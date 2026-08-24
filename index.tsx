@@ -32,7 +32,7 @@ export default function HomeScreen() {
   };
 
   const handlePlay = () => {
-    console.log("Play pressed for level:", level);
+    router.push("/game");
   };
 
   const openStreak = () => {
