@@ -10,13 +10,13 @@ import {
   View,
 } from "react-native";
 
+import { useGame } from "../context/GameContext";
 import { useTheme } from "../context/ThemeContext";
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { isDark, colors } = useTheme();
-  const [streak, setStreak] = useState(7);
-  const [level, setLevel] = useState(67);
+  const { colors } = useTheme();
+  const { level, currentStreak } = useGame();
   const [activeTab, setActiveTab] = useState<"home" | "streak" | "profile">("home");
 
   const handleDailyChallenge = () => {
@@ -54,7 +54,7 @@ export default function HomeScreen() {
             onPress={openStreak}
           >
             <Ionicons name="flame" size={22} color="#FF7A00" />
-            <Text style={[styles.badgeText, { color: colors.text }]}>{streak}</Text>
+            <Text style={[styles.badgeText, { color: colors.text }]}>{currentStreak}</Text>
           </TouchableOpacity>
 
           {/* Leaderboard Badge */}
@@ -163,7 +163,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
   },
   content: {
     flex: 1,
@@ -180,21 +179,18 @@ const styles = StyleSheet.create({
   topBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
     gap: 6,
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 6,
     elevation: 2,
   },
   badgeText: {
-    color: "#0F172A",
     fontSize: 18,
     fontWeight: "700",
   },
@@ -210,20 +206,17 @@ const styles = StyleSheet.create({
   card: {
     width: "100%",
     height: 105,
-    backgroundColor: "#FFFFFF",
     borderRadius: 22,
     borderWidth: 1.5,
-    borderColor: "#E2E8F0",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
     elevation: 2,
   },
   cardLabel: {
-    color: "#475569",
     fontSize: 13,
     fontWeight: "600",
     marginTop: 10,
@@ -237,7 +230,6 @@ const styles = StyleSheet.create({
     marginBottom: 80,
   },
   levelText: {
-    color: "#94A3B8",
     fontSize: 15,
     fontWeight: "700",
     letterSpacing: 2,
@@ -246,19 +238,17 @@ const styles = StyleSheet.create({
   },
   playButton: {
     width: "72%",
-    backgroundColor: "#0F172A",
     paddingVertical: 18,
     borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 6,
   },
   playButtonText: {
-    color: "#FFFFFF",
     fontSize: 24,
     fontWeight: "800",
     letterSpacing: 0.5,
@@ -272,16 +262,14 @@ const styles = StyleSheet.create({
   },
   floatingNavBar: {
     flexDirection: "row",
-    backgroundColor: "#FFFFFF",
     width: "65%",
     height: 60,
     borderRadius: 30,
     borderWidth: 1.5,
-    borderColor: "#E2E8F0",
     justifyContent: "space-around",
     alignItems: "center",
     paddingHorizontal: 12,
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 14,

@@ -2,21 +2,28 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
+import { useGame } from "../context/GameContext";
 import { useTheme } from "../context/ThemeContext";
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { isDark, toggleTheme, colors } = useTheme();
+  const { level, bestStreak, playHistory } = useGame();
+
+  const totalGamesPlayed = Object.values(playHistory).reduce(
+    (sum, val) => sum + val,
+    0
+  );
 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
@@ -50,7 +57,7 @@ export default function ProfileScreen() {
           </View>
           <Text style={[styles.userName, { color: colors.text }]}>Player #1337</Text>
           <View style={[styles.levelBadge, { backgroundColor: isDark ? "#222734" : "#F1F5F9" }]}>
-            <Text style={[styles.levelBadgeText, { color: colors.subtext }]}>LEVEL 67</Text>
+            <Text style={[styles.levelBadgeText, { color: colors.subtext }]}>LEVEL {level}</Text>
           </View>
         </View>
 
@@ -58,16 +65,16 @@ export default function ProfileScreen() {
         <View style={styles.statsGrid}>
           <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={styles.statBoxLabel}>Games Won</Text>
-            <Text style={[styles.statBoxValue, { color: colors.text }]}>142</Text>
+            <Text style={[styles.statBoxValue, { color: colors.text }]}>{totalGamesPlayed}</Text>
           </View>
           <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={styles.statBoxLabel}>Win Rate</Text>
-            <Text style={[styles.statBoxValue, { color: colors.text }]}>78%</Text>
+            <Text style={[styles.statBoxValue, { color: colors.text }]}>100%</Text>
           </View>
           <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={styles.statBoxLabel}>Best Streak</Text>
             <View style={styles.statValueRow}>
-              <Text style={[styles.statBoxValue, { color: colors.text }]}>14</Text>
+              <Text style={[styles.statBoxValue, { color: colors.text }]}>{bestStreak}</Text>
               <Ionicons name="flame" size={20} color="#FF7A00" />
             </View>
           </View>
@@ -166,7 +173,7 @@ export default function ProfileScreen() {
             <Ionicons name="flame-outline" size={26} color="#94A3B8" />
           </TouchableOpacity>
 
-          {/* Profile Tab (Active - does not jump to home) */}
+          {/* Profile Tab (Active) */}
           <View style={styles.navItem}>
             <Ionicons name="person" size={24} color={colors.text} />
           </View>
@@ -179,7 +186,6 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
   },
   scrollContent: {
     paddingHorizontal: 20,
@@ -196,26 +202,21 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#0F172A",
   },
   userCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 24,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
     marginBottom: 16,
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
     shadowRadius: 10,
@@ -225,21 +226,17 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
     borderWidth: 2,
-    borderColor: "#E2E8F0",
   },
   userName: {
     fontSize: 20,
     fontWeight: "800",
-    color: "#0F172A",
     marginBottom: 8,
   },
   levelBadge: {
-    backgroundColor: "#F1F5F9",
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 12,
@@ -247,7 +244,6 @@ const styles = StyleSheet.create({
   levelBadgeText: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#64748B",
     letterSpacing: 1,
   },
   statsGrid: {
@@ -259,12 +255,10 @@ const styles = StyleSheet.create({
   },
   statBox: {
     width: "48%",
-    backgroundColor: "#FFFFFF",
     borderRadius: 18,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 6,
@@ -284,15 +278,12 @@ const styles = StyleSheet.create({
   statBoxValue: {
     fontSize: 20,
     fontWeight: "800",
-    color: "#0F172A",
   },
   sectionCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 22,
     padding: 20,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
@@ -301,7 +292,6 @@ const styles = StyleSheet.create({
   sectionHeader: {
     fontSize: 15,
     fontWeight: "700",
-    color: "#0F172A",
     marginBottom: 14,
   },
   settingRow: {
@@ -318,7 +308,6 @@ const styles = StyleSheet.create({
   settingText: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#334155",
   },
   divider: {
     height: 1,
@@ -333,16 +322,14 @@ const styles = StyleSheet.create({
   },
   floatingNavBar: {
     flexDirection: "row",
-    backgroundColor: "#FFFFFF",
     width: "65%",
     height: 60,
     borderRadius: 30,
     borderWidth: 1.5,
-    borderColor: "#E2E8F0",
     justifyContent: "space-around",
     alignItems: "center",
     paddingHorizontal: 12,
-    shadowColor: "#0F172A",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 14,

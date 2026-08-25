@@ -2,17 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { formatDateKey, useGame } from "../context/GameContext";
 import { useTheme } from "../context/ThemeContext";
 
-// Helper to determine fire heat-map shade based on levels played & dark mode
 const getFireShade = (count: number, isDark: boolean) => {
   if (count === 0) {
     return isDark
@@ -32,7 +32,6 @@ const getFireShade = (count: number, isDark: boolean) => {
   if (count <= 6) {
     return { bg: "#EA580C", text: "#FFFFFF", border: "#FF7A00" };
   }
-  // Max cap: Constant deep flame ember
   return { bg: "#DC2626", text: "#FFFFFF", border: "#EF4444" };
 };
 
@@ -44,10 +43,8 @@ const MONTH_NAMES = [
 export default function StreakScreen() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
-  const [currentStreak] = useState(7);
-  const [bestStreak] = useState(14);
+  const { currentStreak, bestStreak, getGamesForDate, playHistory } = useGame();
 
-  // Month navigation state
   const [displayedDate, setDisplayedDate] = useState(new Date());
 
   const handlePrevMonth = () => {
@@ -64,19 +61,22 @@ export default function StreakScreen() {
 
   const daysOfWeek = ["M", "T", "W", "T", "F", "S", "S"];
 
-  // Generate days based on selected month
-  const totalDaysInMonth = new Date(
-    displayedDate.getFullYear(),
-    displayedDate.getMonth() + 1,
-    0
-  ).getDate();
+  const year = displayedDate.getFullYear();
+  const month = displayedDate.getMonth();
 
-  const monthDays = Array.from({ length: totalDaysInMonth }, (_, index) => {
-    const day = index + 1;
-    // Dynamic sample intensity distribution
-    const count = (day * 3 + displayedDate.getMonth()) % 9;
-    return { day, count };
-  });
+  // Accurate day calculations
+  const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+  const rawFirstDay = new Date(year, month, 1).getDay();
+  // Align Monday = 0, Sunday = 6
+  const startDayOffset = (rawFirstDay + 6) % 7;
+
+  // Active days this month count
+  const activeThisMonth = Object.keys(playHistory).filter((key) => {
+    const [kYear, kMonth] = key.split("-").map(Number);
+    return kYear === year && kMonth === month + 1 && playHistory[key] > 0;
+  }).length;
+
+  const todayKey = formatDateKey(new Date());
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -116,7 +116,9 @@ export default function StreakScreen() {
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>This Month</Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>24 active</Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>
+                {activeThisMonth} {activeThisMonth === 1 ? "day" : "days"}
+              </Text>
             </View>
           </View>
         </View>
@@ -157,25 +159,38 @@ export default function StreakScreen() {
 
           {/* Days Grid */}
           <View style={styles.calendarGrid}>
-            {monthDays.map((item) => {
-              const shade = getFireShade(item.count, isDark);
+            {/* Empty padding slots before 1st day of month */}
+            {Array.from({ length: startDayOffset }).map((_, i) => (
+              <View key={`empty-${i}`} style={styles.emptyDayTile} />
+            ))}
+
+            {/* Real Days 1..N */}
+            {Array.from({ length: totalDaysInMonth }).map((_, idx) => {
+              const day = idx + 1;
+              const dateObj = new Date(year, month, day);
+              const dateKey = formatDateKey(dateObj);
+              const count = getGamesForDate(dateKey);
+              const shade = getFireShade(count, isDark);
+              const isToday = dateKey === todayKey;
+
               return (
                 <View
-                  key={item.day}
+                  key={`day-${day}`}
                   style={[
                     styles.dayTile,
                     {
                       backgroundColor: shade.bg,
-                      borderColor: shade.border,
+                      borderColor: isToday ? "#3B82F6" : shade.border,
+                      borderWidth: isToday ? 2 : 1,
                     },
                   ]}
                 >
                   <Text style={[styles.dayNumber, { color: shade.text }]}>
-                    {item.day}
+                    {day}
                   </Text>
-                  {item.count > 0 && (
+                  {count > 0 && (
                     <Text style={[styles.multiplierText, { color: shade.text }]}>
-                      x{item.count}
+                      x{count}
                     </Text>
                   )}
                 </View>
@@ -358,9 +373,12 @@ const styles = StyleSheet.create({
     width: "12.8%",
     aspectRatio: 1,
     borderRadius: 12,
-    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  emptyDayTile: {
+    width: "12.8%",
+    aspectRatio: 1,
   },
   dayNumber: {
     fontSize: 11,
