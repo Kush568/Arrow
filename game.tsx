@@ -131,7 +131,15 @@ const CenterRadialConfetti = () => {
 export default function GameScreen() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
-  const { level, userSeed, completeLevel, getGamesForDate, currentStreak } = useGame();
+  const {
+    level,
+    userSeed,
+    completeLevel,
+    getGamesForDate,
+    currentStreak,
+    levelProgress,
+    saveLevelProgress,
+  } = useGame();
 
   const [currentLevelState, setCurrentLevelState] = useState(level);
   const { difficulty, cols, rows, baseMoves } = getLevelConfig(currentLevelState);
@@ -273,13 +281,29 @@ export default function GameScreen() {
       s.extendedPath = track;
     }
 
+    // Restore in-progress cleared arrows if continuing the same level
+    const clearedSet = new Set<number>();
+    if (levelProgress && levelProgress.level === lvlToBuild) {
+      levelProgress.clearedSnakeIds.forEach((id) => {
+        clearedSet.add(id);
+        const snake = newSnakes.find((s) => s.id === id);
+        if (snake) {
+          snake.cells.forEach((pt) => {
+            newGrid[pt.y][pt.x] = -1;
+          });
+        }
+        newActiveIds.delete(id);
+      });
+    }
+
     snakesRef.current = newSnakes;
     gridMapRef.current = newGrid;
     activeIdsRef.current = newActiveIds;
     hasTriggeredWinRef.current = false;
 
-    setRemainingArrows(newSnakes.length);
-    setMoves(Math.max(config.baseMoves, newSnakes.length + 8));
+    const remainingCount = newSnakes.length - clearedSet.size;
+    setRemainingArrows(remainingCount);
+    setMoves(Math.max(config.baseMoves, remainingCount + 8));
     setHintedId(null);
     setShowConfetti(false);
     setShowStreakScreen(false);
@@ -478,7 +502,17 @@ export default function GameScreen() {
       });
       snake.isSlithering = true;
       activeIdsRef.current.delete(snake.id);
-      setRemainingArrows((r) => Math.max(0, r - 1));
+
+      const totalArrows = snakesRef.current.length;
+      const remainingCount = activeIdsRef.current.size;
+      setRemainingArrows(remainingCount);
+
+      // Collect all cleared snake IDs and persist to AsyncStorage
+      const allClearedIds = snakesRef.current
+        .filter((s) => !activeIdsRef.current.has(s.id))
+        .map((s) => s.id);
+      saveLevelProgress(currentLevelState, totalArrows, allClearedIds);
+
       if (hintedId === snake.id) setHintedId(null);
     } else {
       triggerHaptic("error");

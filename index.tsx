@@ -15,9 +15,18 @@ import { useTheme } from "../context/ThemeContext";
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { colors } = useTheme();
-  const { level, currentStreak } = useGame();
+  const { colors, isDark } = useTheme();
+  const { level, currentStreak, levelProgress } = useGame();
   const [activeTab, setActiveTab] = useState<"home" | "streak" | "profile">("home");
+
+  // Calculate accurate level completion percentage
+  const progressPercent =
+    levelProgress && levelProgress.level === level && levelProgress.totalArrows > 0
+      ? Math.min(
+          100,
+          Math.round((levelProgress.clearedSnakeIds.length / levelProgress.totalArrows) * 100)
+        )
+      : 0;
 
   const handleDailyChallenge = () => {
     console.log("Daily Challenge pressed");
@@ -110,6 +119,32 @@ export default function HomeScreen() {
           >
             <Text style={[styles.playButtonText, { color: colors.playBtnText }]}>Play</Text>
           </TouchableOpacity>
+
+          {/* In-Level Progress Bar */}
+          <View style={styles.progressContainer}>
+            <View style={styles.progressHeaderRow}>
+              <Text style={[styles.progressLabel, { color: colors.subtext }]}>Completed</Text>
+              <Text style={[styles.progressPercentText, { color: colors.text }]}>
+                {progressPercent}%
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.progressBarTrack,
+                { backgroundColor: isDark ? "#1E2433" : "#E2E8F0" },
+              ]}
+            >
+              <View
+                style={[
+                  styles.progressBarFill,
+                  {
+                    width: `${progressPercent}%`,
+                    backgroundColor: progressPercent === 100 ? "#10B981" : "#3B82F6",
+                  },
+                ]}
+              />
+            </View>
+          </View>
         </View>
       </View>
 
@@ -252,6 +287,36 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "800",
     letterSpacing: 0.5,
+  },
+  progressContainer: {
+    width: "72%",
+    marginTop: 18,
+    gap: 6,
+  },
+  progressHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 2,
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  progressPercentText: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  progressBarTrack: {
+    width: "100%",
+    height: 8,
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: "100%",
+    borderRadius: 4,
   },
   bottomNavWrapper: {
     position: "absolute",
