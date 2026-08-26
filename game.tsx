@@ -42,9 +42,8 @@ interface SnakeItem {
   shakeTimer: number;
 }
 
-// Continuous level scaling with a big, challenging starting map on Level 1
+// Level scaling formula
 const getLevelConfig = (lvl: number) => {
-  // Starts with a large 8x11 grid on level 1 and scales upwards
   const cols = Math.min(15, 8 + Math.floor((lvl - 1) / 2));
   const rows = Math.min(20, 11 + Math.floor((lvl - 1) / 2));
   const baseMoves = Math.floor(cols * rows * 0.9);
@@ -61,17 +60,17 @@ const getLevelConfig = (lvl: number) => {
   return { difficulty, cols, rows, baseMoves, pool };
 };
 
-// Center Burst Confetti Component
+// Center Radial Confetti Burst Component
 const CenterRadialConfetti = () => {
   const particles = useRef(
-    Array.from({ length: 36 }, (_, i) => {
-      const angle = (i / 36) * Math.PI * 2 + (Math.random() - 0.5) * 0.25;
-      const radius = 80 + Math.random() * 150;
+    Array.from({ length: 40 }, (_, i) => {
+      const angle = (i / 40) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
+      const radius = 90 + Math.random() * 160;
       return {
         dx: Math.cos(angle) * radius,
         dy: Math.sin(angle) * radius - 20,
         color: ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#FF7A00"][i % 7],
-        size: 7 + Math.random() * 6,
+        size: 7 + Math.random() * 7,
         anim: new Animated.Value(0),
       };
     })
@@ -79,11 +78,11 @@ const CenterRadialConfetti = () => {
 
   useEffect(() => {
     Animated.stagger(
-      10,
+      8,
       particles.map((p) =>
         Animated.timing(p.anim, {
           toValue: 1,
-          duration: 950,
+          duration: 900,
           useNativeDriver: true,
         })
       )
@@ -98,16 +97,16 @@ const CenterRadialConfetti = () => {
           outputRange: [0, p.dx],
         });
         const translateY = p.anim.interpolate({
-          inputRange: [0, 0.7, 1],
-          outputRange: [0, p.dy, p.dy + 35],
+          inputRange: [0, 0.65, 1],
+          outputRange: [0, p.dy, p.dy + 40],
         });
         const opacity = p.anim.interpolate({
-          inputRange: [0, 0.7, 1],
+          inputRange: [0, 0.75, 1],
           outputRange: [1, 0.9, 0],
         });
         const scale = p.anim.interpolate({
           inputRange: [0, 0.2, 1],
-          outputRange: [0.3, 1.2, 0.4],
+          outputRange: [0.3, 1.25, 0.4],
         });
 
         return (
@@ -132,7 +131,7 @@ const CenterRadialConfetti = () => {
 export default function GameScreen() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
-  const { level, completeLevel, getGamesForDate, currentStreak } = useGame();
+  const { level, userSeed, completeLevel, getGamesForDate, currentStreak } = useGame();
 
   const [currentLevelState, setCurrentLevelState] = useState(level);
   const { difficulty, cols, rows, baseMoves } = getLevelConfig(currentLevelState);
@@ -144,19 +143,22 @@ export default function GameScreen() {
   const [hintedId, setHintedId] = useState<number | null>(null);
 
   const [flashRed, setFlashRed] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [showStreakScreen, setShowStreakScreen] = useState(false);
   const [victory, setVictory] = useState(false);
   const [gameOver, setGameOver] = useState(false);
 
-  // Victory Level Animation States
+  // Victory Level Progression Badges
   const [isPrevLevelGreen, setIsPrevLevelGreen] = useState(false);
   const [isNextLevelBlue, setIsNextLevelBlue] = useState(false);
-  const [isFirstLevelToday, setIsFirstLevelToday] = useState(false);
   const [animatedStreakNum, setAnimatedStreakNum] = useState(currentStreak);
 
-  // Streak scale bump animation
-  const streakBumpAnim = useRef(new Animated.Value(1)).current;
+  // Dedicated Streak Screen Zoom & Fade Animation
+  const streakZoomAnim = useRef(new Animated.Value(0)).current;
+  const streakOpacityAnim = useRef(new Animated.Value(1)).current;
+  const streakNumBumpAnim = useRef(new Animated.Value(1)).current;
 
-  // Responsive board calculation
+  // Board Sizing
   const cellSize = Math.max(22, Math.min(34, Math.floor((SCREEN_WIDTH - 24) / cols)));
   const boardWidth = cols * cellSize;
   const boardHeight = rows * cellSize;
@@ -173,6 +175,7 @@ export default function GameScreen() {
   const snakesRef = useRef<SnakeItem[]>([]);
   const gridMapRef = useRef<number[][]>([]);
   const activeIdsRef = useRef<Set<number>>(new Set());
+  const hasTriggeredWinRef = useRef(false);
 
   const [, setFrameTick] = useState(0);
 
@@ -184,7 +187,18 @@ export default function GameScreen() {
     } catch {}
   };
 
-  // --- GUARANTEED SOLVABLE GENERATOR ---
+  // --- SEED-BASED DETERMINISTIC PRNG (Mulberry32) ---
+  const createSeededRNG = (seedNumber: number) => {
+    let s = (seedNumber ^ 0x6d2b79f5) >>> 0;
+    return () => {
+      let t = (s += 0x6d2b79f5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+
+  // --- GUARANTEED SOLVABLE SEED-BASED LEVEL GENERATOR ---
   const generateLevel = useCallback((targetLvl?: number) => {
     const lvlToBuild = targetLvl !== undefined ? targetLvl : currentLevelState;
     const config = getLevelConfig(lvlToBuild);
@@ -198,8 +212,13 @@ export default function GameScreen() {
     let newGrid: number[][] = [];
     let newActiveIds = new Set<number>();
 
+    // Combines unique userSeed with level number using Knuth's multiplicative hash
+    const baseSeed = ((userSeed ^ (lvlToBuild * 2654435761)) + (lvlToBuild * 9301 + 49297)) >>> 0;
+
     while (!success && attempts < 100) {
       attempts++;
+      const rng = createSeededRNG(baseSeed + attempts * 1013);
+
       newGrid = Array.from({ length: r }, () => Array(c).fill(-1));
       newSnakes = [];
       newActiveIds.clear();
@@ -210,8 +229,8 @@ export default function GameScreen() {
       for (let rowIdx = 0; rowIdx < r; rowIdx++) {
         for (let colIdx = 0; colIdx < c; colIdx++) {
           if (!visited[rowIdx][colIdx]) {
-            let targetLength = lengthPool[Math.floor(Math.random() * lengthPool.length)];
-            let path = carveContiguousSnake(colIdx, rowIdx, visited, targetLength, c, r);
+            let targetLength = lengthPool[Math.floor(rng() * lengthPool.length)];
+            let path = carveContiguousSnake(colIdx, rowIdx, visited, targetLength, c, r, rng);
 
             if (path.length > 0) {
               path.forEach((pt) => {
@@ -242,7 +261,6 @@ export default function GameScreen() {
       }
     }
 
-    // Build slither tracks
     for (let s of newSnakes) {
       let track = [...s.cells];
       let curr = s.cells[s.cells.length - 1];
@@ -258,9 +276,13 @@ export default function GameScreen() {
     snakesRef.current = newSnakes;
     gridMapRef.current = newGrid;
     activeIdsRef.current = newActiveIds;
+    hasTriggeredWinRef.current = false;
+
     setRemainingArrows(newSnakes.length);
     setMoves(Math.max(config.baseMoves, newSnakes.length + 8));
     setHintedId(null);
+    setShowConfetti(false);
+    setShowStreakScreen(false);
     setVictory(false);
     setGameOver(false);
     setHearts(3);
@@ -275,6 +297,76 @@ export default function GameScreen() {
     setCurrentLevelState(level);
     generateLevel(level);
   }, [level]);
+
+  // Open the Next Level screen modal
+  const openVictoryModal = () => {
+    setVictory(true);
+    setTimeout(() => setIsPrevLevelGreen(true), 300);
+    setTimeout(() => setIsNextLevelBlue(true), 700);
+  };
+
+  // Run the full win sequence: Confetti -> Streak Zoom & Fade (if 1st level) -> Next Level screen
+  const handleWinSequence = () => {
+    setShowConfetti(true);
+    triggerHaptic("success");
+
+    const todayKey = formatDateKey(new Date());
+    const playedTodayBefore = getGamesForDate(todayKey);
+    const isFirstToday = playedTodayBefore === 0;
+
+    if (isFirstToday) {
+      // 1. Confetti bursts for 600ms, then Streak screen opens
+      setTimeout(() => {
+        setAnimatedStreakNum(currentStreak);
+        streakZoomAnim.setValue(0);
+        streakOpacityAnim.setValue(1);
+        streakNumBumpAnim.setValue(1);
+        setShowStreakScreen(true);
+
+        // Entrance spring (0 -> 1)
+        Animated.spring(streakZoomAnim, {
+          toValue: 1,
+          friction: 5,
+          tension: 40,
+          useNativeDriver: true,
+        }).start(() => {
+          // Number counts up
+          setTimeout(() => {
+            setAnimatedStreakNum(currentStreak + 1);
+            triggerHaptic("light");
+            Animated.sequence([
+              Animated.timing(streakNumBumpAnim, { toValue: 1.35, duration: 150, useNativeDriver: true }),
+              Animated.spring(streakNumBumpAnim, { toValue: 1, friction: 3, tension: 50, useNativeDriver: true }),
+            ]).start();
+
+            // Zoom in & Fade out
+            setTimeout(() => {
+              Animated.parallel([
+                Animated.timing(streakZoomAnim, {
+                  toValue: 2.2,
+                  duration: 550,
+                  useNativeDriver: true,
+                }),
+                Animated.timing(streakOpacityAnim, {
+                  toValue: 0,
+                  duration: 550,
+                  useNativeDriver: true,
+                }),
+              ]).start(() => {
+                setShowStreakScreen(false);
+                openVictoryModal();
+              });
+            }, 750);
+          }, 450);
+        });
+      }, 600);
+    } else {
+      // Not first level today -> Confetti bursts, then Next Level screen appears
+      setTimeout(() => {
+        openVictoryModal();
+      }, 850);
+    }
+  };
 
   // --- ANIMATION LOOP ---
   useEffect(() => {
@@ -300,29 +392,9 @@ export default function GameScreen() {
         snakes.length > 0 &&
         !snakes.some((s) => s.isSlithering && s.slitherProgress < s.extendedPath.length)
       ) {
-        if (!victory) {
-          const todayKey = formatDateKey(new Date());
-          const playedTodayBefore = getGamesForDate(todayKey);
-          const firstToday = playedTodayBefore === 0;
-
-          setIsFirstLevelToday(firstToday);
-          setAnimatedStreakNum(currentStreak);
-          setVictory(true);
-          triggerHaptic("success");
-
-          // Sequence level badges animation
-          setTimeout(() => setIsPrevLevelGreen(true), 350);
-          setTimeout(() => setIsNextLevelBlue(true), 750);
-
-          if (firstToday) {
-            setTimeout(() => {
-              setAnimatedStreakNum(currentStreak + 1);
-              Animated.sequence([
-                Animated.timing(streakBumpAnim, { toValue: 1.4, duration: 150, useNativeDriver: true }),
-                Animated.spring(streakBumpAnim, { toValue: 1, friction: 3, tension: 40, useNativeDriver: true }),
-              ]).start();
-            }, 600);
-          }
+        if (!hasTriggeredWinRef.current) {
+          hasTriggeredWinRef.current = true;
+          handleWinSequence();
         }
       }
 
@@ -334,24 +406,63 @@ export default function GameScreen() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [victory, currentStreak]);
+  }, [currentStreak]);
 
-  // --- TAP INTERACTION ---
+  // --- PRECISE ARROW HIT-TESTING ---
   const handleTap = (clientX: number, clientY: number) => {
     const p = panRef.current;
     const s = scaleRef.current;
 
     const boardScreenLeft = (SCREEN_WIDTH - boardWidth * s) / 2 + p.x;
-    const boardScreenTop = SCREEN_HEIGHT * 0.45 - (boardHeight * s) / 2 + p.y;
+    const boardScreenTop = (SCREEN_HEIGHT - boardHeight * s) / 2 + p.y;
 
-    const clickX = Math.floor((clientX - boardScreenLeft) / (cellSize * s));
-    const clickY = Math.floor((clientY - boardScreenTop) / (cellSize * s));
+    // Convert touch point to board local coordinates (unscaled)
+    const touchBoardX = (clientX - boardScreenLeft) / s;
+    const touchBoardY = (clientY - boardScreenTop) / s;
 
-    if (clickX < 0 || clickX >= cols || clickY < 0 || clickY >= rows) return;
+    // Hit tolerance: touch must be directly on or very close to the arrow stroke
+    const hitTolerance = cellSize * 0.42;
 
-    const id = gridMapRef.current[clickY]?.[clickX];
-    if (id && id !== -1 && activeIdsRef.current.has(id)) {
-      tapSnake(id);
+    let closestSnakeId: number | null = null;
+    let minDistance = Infinity;
+
+    // Check distance to exact segments and arrowhead of every active arrow
+    for (const snake of snakesRef.current) {
+      if (snake.isSlithering || !activeIdsRef.current.has(snake.id)) continue;
+
+      let snakeMinDist = Infinity;
+
+      // 1. Distance to line segments
+      for (let i = 1; i < snake.cells.length; i++) {
+        const p1 = snake.cells[i - 1];
+        const p2 = snake.cells[i];
+
+        const x1 = (p1.x + 0.5) * cellSize;
+        const y1 = (p1.y + 0.5) * cellSize;
+        const x2 = (p2.x + 0.5) * cellSize;
+        const y2 = (p2.y + 0.5) * cellSize;
+
+        const d = distToSegment(touchBoardX, touchBoardY, x1, y1, x2, y2);
+        if (d < snakeMinDist) snakeMinDist = d;
+      }
+
+      // 2. Distance to arrowhead tip
+      const head = snake.cells[snake.cells.length - 1];
+      const hx = (head.x + 0.5) * cellSize;
+      const hy = (head.y + 0.5) * cellSize;
+      const headDist = Math.hypot(touchBoardX - hx, touchBoardY - hy);
+      if (headDist < snakeMinDist) snakeMinDist = headDist;
+
+      // Check if tap was on this arrow
+      if (snakeMinDist <= hitTolerance && snakeMinDist < minDistance) {
+        minDistance = snakeMinDist;
+        closestSnakeId = snake.id;
+      }
+    }
+
+    // Only trigger if an exact arrow was touched
+    if (closestSnakeId !== null) {
+      tapSnake(closestSnakeId);
     }
   };
 
@@ -466,22 +577,62 @@ export default function GameScreen() {
       {/* Red flash effect on life lost */}
       {flashRed && <View pointerEvents="none" style={styles.redFlashOverlay} />}
 
-      {/* TOP BAR */}
-      <View style={styles.topBar}>
+      {/* FULL-SCREEN DRAGGABLE & ZOOMABLE CANVAS */}
+      <View style={styles.fullScreenBoard} {...panResponder.panHandlers}>
+        <Svg width={SCREEN_WIDTH} height={SCREEN_HEIGHT} style={styles.svgContainer}>
+          <G
+            transform={`translate(${
+              (SCREEN_WIDTH - boardWidth * scale) / 2 + pan.x
+            }, ${
+              (SCREEN_HEIGHT - boardHeight * scale) / 2 + pan.y
+            }) scale(${scale})`}
+          >
+            {/* Background Grid Dots */}
+            {Array.from({ length: rows }).map((_, r) =>
+              Array.from({ length: cols }).map((_, c) => (
+                <Circle
+                  key={`dot-${r}-${c}`}
+                  cx={(c + 0.5) * cellSize}
+                  cy={(r + 0.5) * cellSize}
+                  r={2.6}
+                  fill={isDark ? "#2A3142" : "#CBD5E1"}
+                />
+              ))
+            )}
+
+            {/* Static Arrows */}
+            {snakesRef.current.map((s) => {
+              if (s.isSlithering || !activeIdsRef.current.has(s.id)) return null;
+              return renderStaticSnake(s, cellSize, hintedId === s.id, isDark);
+            })}
+
+            {/* Slithering Blue Animated Arrows */}
+            {snakesRef.current.map((s) => {
+              if (!s.isSlithering) return null;
+              return renderSlitheringSnake(s, cellSize);
+            })}
+          </G>
+        </Svg>
+      </View>
+
+      {/* FLOATING TOP BAR */}
+      <View style={styles.floatingTopBar} pointerEvents="box-none">
         <TouchableOpacity
-          style={[styles.roundBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+          style={[styles.floatingRoundBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
           activeOpacity={0.7}
           onPress={() => router.replace("/")}
         >
           <Ionicons name="chevron-back" size={22} color={colors.text} />
         </TouchableOpacity>
 
-        <Text style={[styles.levelTitleText, { color: colors.text }]}>
-          Level {currentLevelState}
-        </Text>
+        <View style={[styles.floatingLevelBadge, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.levelTitleText, { color: colors.text }]}>
+            Level {currentLevelState}
+          </Text>
+        </View>
 
         <TouchableOpacity
-          style={[styles.roundBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+          style={[styles.floatingRoundBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
           activeOpacity={0.7}
           onPress={() => generateLevel(currentLevelState)}
         >
@@ -489,12 +640,12 @@ export default function GameScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* STATUS PILL */}
-      <View style={styles.statusPillWrapper}>
+      {/* FLOATING STATUS PILL (Hearts, Remaining, Difficulty) */}
+      <View style={styles.floatingStatusWrapper} pointerEvents="box-none">
         <View style={[styles.statusPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {/* Arrows Remaining Count */}
           <View style={styles.movesTag}>
-            <Ionicons name="navigate-outline" size={16} color="#3B82F6" />
+            <Ionicons name="navigate-outline" size={15} color="#3B82F6" />
             <Text style={[styles.movesText, { color: colors.text }]}>
               {remainingArrows}
             </Text>
@@ -506,7 +657,7 @@ export default function GameScreen() {
               <Ionicons
                 key={h}
                 name={h <= hearts ? "heart" : "heart-outline"}
-                size={18}
+                size={17}
                 color={h <= hearts ? "#EF4444" : "#CBD5E1"}
               />
             ))}
@@ -545,50 +696,8 @@ export default function GameScreen() {
         </View>
       </View>
 
-      {/* INTERACTIVE DRAGGABLE / ZOOMABLE CANVAS */}
-      <View style={styles.boardArea} {...panResponder.panHandlers}>
-        <Svg
-          width={SCREEN_WIDTH}
-          height={SCREEN_HEIGHT * 0.62}
-          style={styles.svgContainer}
-        >
-          <G
-            transform={`translate(${
-              (SCREEN_WIDTH - boardWidth * scale) / 2 + pan.x
-            }, ${
-              SCREEN_HEIGHT * 0.31 - (boardHeight * scale) / 2 + pan.y
-            }) scale(${scale})`}
-          >
-            {/* Background Grid Dots */}
-            {Array.from({ length: rows }).map((_, r) =>
-              Array.from({ length: cols }).map((_, c) => (
-                <Circle
-                  key={`dot-${r}-${c}`}
-                  cx={(c + 0.5) * cellSize}
-                  cy={(r + 0.5) * cellSize}
-                  r={2.6}
-                  fill={isDark ? "#2A3142" : "#CBD5E1"}
-                />
-              ))
-            )}
-
-            {/* Static Arrows */}
-            {snakesRef.current.map((s) => {
-              if (s.isSlithering || !activeIdsRef.current.has(s.id)) return null;
-              return renderStaticSnake(s, cellSize, hintedId === s.id, isDark);
-            })}
-
-            {/* Slithering Blue Animated Arrows */}
-            {snakesRef.current.map((s) => {
-              if (!s.isSlithering) return null;
-              return renderSlitheringSnake(s, cellSize);
-            })}
-          </G>
-        </Svg>
-      </View>
-
-      {/* BOTTOM ACTION BUTTONS */}
-      <View style={styles.bottomControls}>
+      {/* FLOATING BOTTOM ACTION BUTTONS */}
+      <View style={styles.floatingBottomControls} pointerEvents="box-none">
         <TouchableOpacity
           style={[styles.circleActionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
           activeOpacity={0.8}
@@ -611,38 +720,48 @@ export default function GameScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* CENTER CONFETTI BURST */}
-      {victory && <CenterRadialConfetti />}
+      {/* 1. CENTER CONFETTI BURST (Appears first upon untangling last arrow) */}
+      {showConfetti && <CenterRadialConfetti />}
 
-      {/* VICTORY MODAL */}
+      {/* 2. DEDICATED STREAK CELEBRATION SCREEN (Fire icon + number zoom & fade) */}
+      <Modal visible={showStreakScreen} transparent animationType="none">
+        <View style={styles.streakOverlayContainer}>
+          <Animated.View
+            style={[
+              styles.streakCenterBox,
+              {
+                opacity: streakOpacityAnim,
+                transform: [{ scale: streakZoomAnim }],
+              },
+            ]}
+          >
+            <View style={styles.streakFireCircle}>
+              <Ionicons name="flame" size={84} color="#FF7A00" />
+            </View>
+            <Animated.Text
+              style={[
+                styles.streakGiantNumber,
+                { transform: [{ scale: streakNumBumpAnim }] },
+              ]}
+            >
+              {animatedStreakNum}
+            </Animated.Text>
+            <Text style={styles.streakLabelText}>Day Streak</Text>
+          </Animated.View>
+        </View>
+      </Modal>
+
+      {/* 3. NEXT LEVEL SCREEN (Appears after confetti / streak sequence) */}
       <Modal visible={victory} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            {/* FIRST LEVEL OF THE DAY STREAK ANIMATION */}
-            {isFirstLevelToday ? (
-              <View style={styles.streakCelebrationBox}>
-                <View style={styles.streakFireCircle}>
-                  <Ionicons name="flame" size={54} color="#FF7A00" />
-                </View>
-                <Text style={styles.streakCelebrationTitle}>Streak Extended</Text>
-                <Animated.Text
-                  style={[
-                    styles.streakCelebrationSub,
-                    { color: "#FF7A00", transform: [{ scale: streakBumpAnim }] },
-                  ]}
-                >
-                  {animatedStreakNum} Day Streak
-                </Animated.Text>
-              </View>
-            ) : (
-              <View style={styles.modalIconCircle}>
-                <Ionicons name="trophy" size={40} color="#EAB308" />
-              </View>
-            )}
+            <View style={styles.modalIconCircle}>
+              <Ionicons name="trophy" size={40} color="#EAB308" />
+            </View>
 
             <Text style={[styles.modalTitle, { color: colors.text }]}>Level Cleared</Text>
 
-            {/* LEVEL TRANSITION INDICATOR */}
+            {/* LEVEL PROGRESSION ROW */}
             <View style={styles.levelTransitionRow}>
               {/* Finished Level Badge (Turns Green) */}
               <View
@@ -663,7 +782,7 @@ export default function GameScreen() {
                 <Text style={styles.levelStepText}>Lvl {currentLevelState}</Text>
               </View>
 
-              {/* Arrow Transition */}
+              {/* Arrow Indicator */}
               <Ionicons
                 name="arrow-forward"
                 size={20}
@@ -843,6 +962,15 @@ function renderArrowHead(x: number, y: number, dir: Point, size: number, color: 
   );
 }
 
+// Calculate perpendicular distance from a point to a line segment
+function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+  if (l2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+}
+
 function samplePolylineSegment(path: Point[], startDist: number, endDist: number): Point[] {
   let pts: Point[] = [];
   let currentDist = 0;
@@ -874,21 +1002,22 @@ function samplePolylineSegment(path: Point[], startDist: number, endDist: number
   return pts;
 }
 
-// --- GENERATOR LOGIC ---
+// --- SEED-BASED CONTIGUOUS CARVER ---
 function carveContiguousSnake(
   startX: number,
   startY: number,
   visited: boolean[][],
   targetLen: number,
   cols: number,
-  rows: number
+  rows: number,
+  rng: () => number
 ): Point[] {
   let path: Point[] = [{ x: startX, y: startY }];
   visited[startY][startX] = true;
   let curr = { x: startX, y: startY };
 
-  let currentDir = DIRS[Math.floor(Math.random() * DIRS.length)];
-  let straightSteps = Math.floor(Math.random() * 4) + 2;
+  let currentDir = DIRS[Math.floor(rng() * DIRS.length)];
+  let straightSteps = Math.floor(rng() * 4) + 2;
 
   while (path.length < targetLen) {
     if (straightSteps <= 0 || !canStep(curr, currentDir, visited, cols, rows)) {
@@ -898,8 +1027,8 @@ function carveContiguousSnake(
           canStep(curr, d, visited, cols, rows)
       );
       if (turnOptions.length === 0) break;
-      currentDir = turnOptions[Math.floor(Math.random() * turnOptions.length)];
-      straightSteps = Math.floor(Math.random() * 4) + 2;
+      currentDir = turnOptions[Math.floor(rng() * turnOptions.length)];
+      straightSteps = Math.floor(rng() * 4) + 2;
     }
 
     let nextPt = { x: curr.x + currentDir.x, y: curr.y + currentDir.y };
@@ -1037,43 +1166,77 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(239, 68, 68, 0.28)",
     zIndex: 999,
   },
-  topBar: {
+  fullScreenBoard: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  svgContainer: {
+    flex: 1,
+  },
+  floatingTopBar: {
+    position: "absolute",
+    top: 14,
+    left: 20,
+    right: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    marginTop: 10,
-    marginBottom: 8,
+    zIndex: 20,
   },
-  roundBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  floatingRoundBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  floatingLevelBadge: {
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 20,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   levelTitleText: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "800",
   },
-  statusPillWrapper: {
+  floatingStatusWrapper: {
+    position: "absolute",
+    top: 68,
+    left: 0,
+    right: 0,
     alignItems: "center",
-    marginBottom: 8,
+    zIndex: 20,
   },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
-    gap: 16,
+    gap: 14,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   movesTag: {
     flexDirection: "row",
@@ -1097,20 +1260,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
-  boardArea: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  svgContainer: {
-    flex: 1,
-  },
-  bottomControls: {
+  floatingBottomControls: {
+    position: "absolute",
+    bottom: 28,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     justifyContent: "center",
-    alignItems: "center",
     gap: 24,
-    paddingBottom: 28,
+    zIndex: 20,
   },
   circleActionBtn: {
     width: 54,
@@ -1153,6 +1311,46 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  streakOverlayContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  streakCenterBox: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  streakFireCircle: {
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: "#FFF3E0",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#FF7A00",
+    shadowColor: "#FF7A00",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  streakGiantNumber: {
+    fontSize: 54,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    marginTop: 18,
+    letterSpacing: 1,
+  },
+  streakLabelText: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FF9800",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    marginTop: 4,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",
@@ -1176,43 +1374,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 12,
   },
-  streakCelebrationBox: {
-    alignItems: "center",
-    marginBottom: 14,
-  },
-  streakFireCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#FFF3E0",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: "#FFB074",
-  },
-  streakCelebrationTitle: {
-    fontSize: 14,
-    fontWeight: "900",
-    color: "#FF7A00",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-  streakCelebrationSub: {
-    fontSize: 22,
-    fontWeight: "900",
-    marginTop: 2,
-  },
   modalTitle: {
     fontSize: 22,
     fontWeight: "800",
-    marginBottom: 16,
+    marginBottom: 18,
   },
   levelTransitionRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
+    gap: 14,
     marginBottom: 24,
     width: "100%",
   },
@@ -1227,7 +1398,6 @@ const styles = StyleSheet.create({
   levelStepText: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#FFFFFF",
   },
   modalSubtext: {
     fontSize: 14,

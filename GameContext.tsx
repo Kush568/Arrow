@@ -14,26 +14,31 @@ type PlayHistory = {
 
 type GameContextType = {
   level: number;
+  userSeed: number;
   currentStreak: number;
   bestStreak: number;
   playHistory: PlayHistory;
   completeLevel: () => Promise<void>;
   getGamesForDate: (dateKey: string) => number;
+  resetAllData: () => Promise<void>;
 };
 
 const GameContext = createContext<GameContextType>({
   level: 1,
+  userSeed: 123456,
   currentStreak: 0,
   bestStreak: 0,
   playHistory: {},
   completeLevel: async () => {},
   getGamesForDate: () => 0,
+  resetAllData: async () => {},
 });
 
 const STORAGE_KEYS = {
   LEVEL: "@game_level",
   HISTORY: "@game_history",
   BEST_STREAK: "@game_best_streak",
+  USER_SEED: "@game_user_seed",
 };
 
 // Accurate streak calculation based on consecutive active days
@@ -80,6 +85,7 @@ const calculateStreak = (history: PlayHistory): number => {
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [level, setLevel] = useState(1);
+  const [userSeed, setUserSeed] = useState(123456);
   const [playHistory, setPlayHistory] = useState<PlayHistory>({});
   const [currentStreak, setCurrentStreak] = useState(0);
   const [bestStreak, setBestStreak] = useState(0);
@@ -88,16 +94,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [savedLevel, savedHistory, savedBest] = await Promise.all([
+        const [savedLevel, savedHistory, savedBest, savedUserSeed] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.LEVEL),
           AsyncStorage.getItem(STORAGE_KEYS.HISTORY),
           AsyncStorage.getItem(STORAGE_KEYS.BEST_STREAK),
+          AsyncStorage.getItem(STORAGE_KEYS.USER_SEED),
         ]);
+
+        let seed = savedUserSeed ? parseInt(savedUserSeed, 10) : 0;
+        // Generate unique random seed for this user on first launch
+        if (!seed) {
+          seed = Math.floor(Math.random() * 2147483647) + 1;
+          await AsyncStorage.setItem(STORAGE_KEYS.USER_SEED, seed.toString());
+        }
 
         const parsedLevel = savedLevel ? parseInt(savedLevel, 10) : 1;
         const parsedHistory: PlayHistory = savedHistory ? JSON.parse(savedHistory) : {};
         const parsedBest = savedBest ? parseInt(savedBest, 10) : 0;
 
+        setUserSeed(seed);
         setLevel(parsedLevel);
         setPlayHistory(parsedHistory);
 
@@ -144,15 +159,33 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return playHistory[dateKey] || 0;
   };
 
+  const resetAllData = async () => {
+    try {
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.LEVEL,
+        STORAGE_KEYS.HISTORY,
+        STORAGE_KEYS.BEST_STREAK,
+      ]);
+      setLevel(1);
+      setPlayHistory({});
+      setCurrentStreak(0);
+      setBestStreak(0);
+    } catch (err) {
+      console.error("Failed to reset game data", err);
+    }
+  };
+
   return (
     <GameContext.Provider
       value={{
         level,
+        userSeed,
         currentStreak,
         bestStreak,
         playHistory,
         completeLevel,
         getGamesForDate,
+        resetAllData,
       }}
     >
       {children}

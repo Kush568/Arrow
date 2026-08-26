@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  Modal,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -18,7 +19,7 @@ import { useTheme } from "../context/ThemeContext";
 export default function ProfileScreen() {
   const router = useRouter();
   const { isDark, toggleTheme, colors } = useTheme();
-  const { level, bestStreak, playHistory } = useGame();
+  const { level, bestStreak, playHistory, resetAllData } = useGame();
 
   const totalGamesPlayed = Object.values(playHistory).reduce(
     (sum, val) => sum + val,
@@ -28,6 +29,7 @@ export default function ProfileScreen() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [notifications, setNotifications] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -40,7 +42,10 @@ export default function ProfileScreen() {
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
-            style={[styles.backButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[
+              styles.backButton,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
             activeOpacity={0.7}
             onPress={() => router.replace("/")}
           >
@@ -51,48 +56,101 @@ export default function ProfileScreen() {
         </View>
 
         {/* User Card */}
-        <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[styles.avatar, { backgroundColor: isDark ? "#222734" : "#F1F5F9", borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.userCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <View
+            style={[
+              styles.avatar,
+              {
+                backgroundColor: isDark ? "#222734" : "#F1F5F9",
+                borderColor: colors.border,
+              },
+            ]}
+          >
             <Ionicons name="person" size={40} color={colors.subtext} />
           </View>
           <Text style={[styles.userName, { color: colors.text }]}>Player #1337</Text>
-          <View style={[styles.levelBadge, { backgroundColor: isDark ? "#222734" : "#F1F5F9" }]}>
-            <Text style={[styles.levelBadgeText, { color: colors.subtext }]}>LEVEL {level}</Text>
+          <View
+            style={[
+              styles.levelBadge,
+              { backgroundColor: isDark ? "#222734" : "#F1F5F9" },
+            ]}
+          >
+            <Text style={[styles.levelBadgeText, { color: colors.subtext }]}>
+              LEVEL {level}
+            </Text>
           </View>
         </View>
 
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
-          <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.statBox,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
             <Text style={styles.statBoxLabel}>Games Won</Text>
-            <Text style={[styles.statBoxValue, { color: colors.text }]}>{totalGamesPlayed}</Text>
+            <Text style={[styles.statBoxValue, { color: colors.text }]}>
+              {totalGamesPlayed}
+            </Text>
           </View>
-          <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.statBox,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
             <Text style={styles.statBoxLabel}>Win Rate</Text>
             <Text style={[styles.statBoxValue, { color: colors.text }]}>100%</Text>
           </View>
-          <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.statBox,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
             <Text style={styles.statBoxLabel}>Best Streak</Text>
             <View style={styles.statValueRow}>
-              <Text style={[styles.statBoxValue, { color: colors.text }]}>{bestStreak}</Text>
+              <Text style={[styles.statBoxValue, { color: colors.text }]}>
+                {bestStreak}
+              </Text>
               <Ionicons name="flame" size={20} color="#FF7A00" />
             </View>
           </View>
-          <View style={[styles.statBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.statBox,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
             <Text style={styles.statBoxLabel}>Global Rank</Text>
             <Text style={[styles.statBoxValue, { color: colors.text }]}>#82</Text>
           </View>
         </View>
 
         {/* Settings & Preferences */}
-        <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionHeader, { color: colors.text }]}>Settings</Text>
+        <View
+          style={[
+            styles.sectionCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.sectionHeader, { color: colors.text }]}>
+            Settings
+          </Text>
 
           {/* Dark Mode Toggle */}
           <View style={styles.settingRow}>
             <View style={styles.settingLabelRow}>
               <Ionicons name="moon-outline" size={20} color={colors.subtext} />
-              <Text style={[styles.settingText, { color: colors.text }]}>Dark Mode</Text>
+              <Text style={[styles.settingText, { color: colors.text }]}>
+                Dark Mode
+              </Text>
             </View>
             <Switch
               value={isDark}
@@ -108,7 +166,9 @@ export default function ProfileScreen() {
           <View style={styles.settingRow}>
             <View style={styles.settingLabelRow}>
               <Ionicons name="volume-high-outline" size={20} color="#64748B" />
-              <Text style={styles.settingText}>Sound FX</Text>
+              <Text style={[styles.settingText, { color: colors.text }]}>
+                Sound FX
+              </Text>
             </View>
             <Switch
               value={soundEnabled}
@@ -123,8 +183,14 @@ export default function ProfileScreen() {
           {/* Haptics */}
           <View style={styles.settingRow}>
             <View style={styles.settingLabelRow}>
-              <Ionicons name="phone-portrait-outline" size={20} color="#64748B" />
-              <Text style={styles.settingText}>Haptic Feedback</Text>
+              <Ionicons
+                name="phone-portrait-outline"
+                size={20}
+                color="#64748B"
+              />
+              <Text style={[styles.settingText, { color: colors.text }]}>
+                Haptic Feedback
+              </Text>
             </View>
             <Switch
               value={hapticsEnabled}
@@ -140,7 +206,9 @@ export default function ProfileScreen() {
           <View style={styles.settingRow}>
             <View style={styles.settingLabelRow}>
               <Ionicons name="notifications-outline" size={20} color="#64748B" />
-              <Text style={styles.settingText}>Daily Reminders</Text>
+              <Text style={[styles.settingText, { color: colors.text }]}>
+                Daily Reminders
+              </Text>
             </View>
             <Switch
               value={notifications}
@@ -149,12 +217,75 @@ export default function ProfileScreen() {
               thumbColor="#FFFFFF"
             />
           </View>
+
+          <View style={styles.divider} />
+
+          {/* Reset All Progress Button */}
+          <TouchableOpacity
+            style={styles.resetButton}
+            activeOpacity={0.7}
+            onPress={() => setShowResetConfirm(true)}
+          >
+            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+            <Text style={styles.resetButtonText}>Reset All Progress</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
+      {/* RESET CONFIRMATION MODAL */}
+      <Modal visible={showResetConfirm} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.dangerIconCircle}>
+              <Ionicons name="warning-outline" size={38} color="#EF4444" />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Reset Progress?
+            </Text>
+            <Text style={[styles.modalSubtext, { color: colors.subtext }]}>
+              This will reset your level back to 1, clear active & best streaks,
+              and delete all play history. This action cannot be undone.
+            </Text>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                style={[styles.modalCancelBtn, { borderColor: colors.border }]}
+                activeOpacity={0.7}
+                onPress={() => setShowResetConfirm(false)}
+              >
+                <Text style={[styles.modalCancelText, { color: colors.text }]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalConfirmBtn}
+                activeOpacity={0.8}
+                onPress={async () => {
+                  await resetAllData();
+                  setShowResetConfirm(false);
+                }}
+              >
+                <Text style={styles.modalConfirmText}>Reset</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Floating Bottom Navigation Bar */}
       <View style={styles.bottomNavWrapper}>
-        <View style={[styles.floatingNavBar, { backgroundColor: colors.navBg, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.floatingNavBar,
+            { backgroundColor: colors.navBg, borderColor: colors.border },
+          ]}
+        >
           {/* Home Tab */}
           <TouchableOpacity
             style={styles.navItem}
@@ -312,6 +443,86 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: "#F1F5F9",
+    marginVertical: 4,
+  },
+  resetButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    marginTop: 10,
+    borderRadius: 14,
+    backgroundColor: "#FEE2E2",
+  },
+  resetButtonText: {
+    color: "#EF4444",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "88%",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  dangerIconCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    marginBottom: 6,
+  },
+  modalSubtext: {
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 19,
+    marginBottom: 20,
+  },
+  modalBtnRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 16,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+  },
+  modalConfirmText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
   },
   bottomNavWrapper: {
     position: "absolute",
