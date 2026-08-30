@@ -2,10 +2,19 @@ import { useEffect } from "react";
 import { Stack } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import * as Updates from "expo-updates";
+import { useFonts } from "expo-font";
+import { Ionicons, MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { ThemeProvider } from "../context/ThemeContext";
 import { GameProvider } from "../context/GameContext";
 
 export default function RootLayout() {
+  // Load icon font families for web browsers
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+    ...MaterialCommunityIcons.font,
+    ...Feather.font,
+  });
+
   useEffect(() => {
     // Lock screen orientation to Portrait
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
@@ -26,6 +35,10 @@ export default function RootLayout() {
 
     checkForAppUpdates();
   }, []);
+
+  if (!fontsLoaded) {
+    return null;
+  }
 
   return (
     <ThemeProvider>
