@@ -1,13 +1,14 @@
 {
   "expo": {
-    "name": "my-app",
-    "slug": "my-app",
+    "name": "arrow maze",
+    "slug": "arrow-maze",
     "version": "1.0.0",
     "orientation": "portrait",
     "updates": {
       "enabled": true,
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 3000
+      "fallbackToCacheTimeout": 3000,
+      "url": "https://arrowmaze.pages.dev"
     },
     "runtimeVersion": {
       "policy": "appVersion"
