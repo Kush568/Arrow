@@ -35,4 +35,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=arrowmaze # Your Cloudflare project name
+          command: pages deploy dist --project-name=arrowpuzzle # Your Cloudflare project name
