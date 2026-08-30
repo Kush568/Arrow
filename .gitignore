@@ -1,7 +1,7 @@
 # Dependencies
 node_modules/
 **/node_modules/
-old
+old/node_modules/
 
 # Expo / React Native
 .expo/
