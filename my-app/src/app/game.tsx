@@ -1,22 +1,22 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Animated,
-  Dimensions,
-  Modal,
-  PanResponder,
-  SafeAreaView,
-  StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
+  TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
+  PanResponder,
+  Dimensions,
+  Modal,
+  Animated,
 } from "react-native";
-import Svg, { Circle, G, Line, Polygon } from "react-native-svg";
-import { formatDateKey, useGame } from "../context/GameContext";
+import Svg, { Circle, Line, Polygon, G } from "react-native-svg";
+import { Ionicons, Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import { useTheme } from "../context/ThemeContext";
+import { useGame, formatDateKey } from "../context/GameContext";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -42,7 +42,7 @@ interface SnakeItem {
   shakeTimer: number;
 }
 
-// Level scaling formula
+// Continuous level scaling with a big, challenging starting map on Level 1
 const getLevelConfig = (lvl: number) => {
   const cols = Math.min(15, 8 + Math.floor((lvl - 1) / 2));
   const rows = Math.min(20, 11 + Math.floor((lvl - 1) / 2));
@@ -156,7 +156,7 @@ export default function GameScreen() {
   const [victory, setVictory] = useState(false);
   const [gameOver, setGameOver] = useState(false);
 
-  // Victory Level Progression Badges
+  // Victory Progression Badges
   const [isPrevLevelGreen, setIsPrevLevelGreen] = useState(false);
   const [isNextLevelBlue, setIsNextLevelBlue] = useState(false);
   const [animatedStreakNum, setAnimatedStreakNum] = useState(currentStreak);
@@ -185,7 +185,10 @@ export default function GameScreen() {
   const activeIdsRef = useRef<Set<number>>(new Set());
   const hasTriggeredWinRef = useRef(false);
 
+  // High-performance render trigger
   const [, setFrameTick] = useState(0);
+  const animFrameIdRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number>(0);
 
   const triggerHaptic = (type: "light" | "error" | "success") => {
     try {
@@ -195,7 +198,7 @@ export default function GameScreen() {
     } catch {}
   };
 
-  // --- SEED-BASED DETERMINISTIC PRNG (Mulberry32) ---
+  // Seeded PRNG (Mulberry32)
   const createSeededRNG = (seedNumber: number) => {
     let s = (seedNumber ^ 0x6d2b79f5) >>> 0;
     return () => {
@@ -206,116 +209,119 @@ export default function GameScreen() {
     };
   };
 
-  // --- GUARANTEED SOLVABLE SEED-BASED LEVEL GENERATOR ---
-  const generateLevel = useCallback((targetLvl?: number) => {
-    const lvlToBuild = targetLvl !== undefined ? targetLvl : currentLevelState;
-    const config = getLevelConfig(lvlToBuild);
-    const c = config.cols;
-    const r = config.rows;
-    const lengthPool = config.pool;
+  // --- GUARANTEED SOLVABLE LEVEL GENERATOR ---
+  const generateLevel = useCallback(
+    (targetLvl?: number) => {
+      const lvlToBuild = targetLvl !== undefined ? targetLvl : currentLevelState;
+      const config = getLevelConfig(lvlToBuild);
+      const c = config.cols;
+      const r = config.rows;
+      const lengthPool = config.pool;
 
-    let success = false;
-    let attempts = 0;
-    let newSnakes: SnakeItem[] = [];
-    let newGrid: number[][] = [];
-    let newActiveIds = new Set<number>();
+      let success = false;
+      let attempts = 0;
+      let newSnakes: SnakeItem[] = [];
+      let newGrid: number[][] = [];
+      let newActiveIds = new Set<number>();
 
-    // Combines unique userSeed with level number using Knuth's multiplicative hash
-    const baseSeed = ((userSeed ^ (lvlToBuild * 2654435761)) + (lvlToBuild * 9301 + 49297)) >>> 0;
+      const baseSeed = ((userSeed ^ (lvlToBuild * 2654435761)) + (lvlToBuild * 9301 + 49297)) >>> 0;
 
-    while (!success && attempts < 100) {
-      attempts++;
-      const rng = createSeededRNG(baseSeed + attempts * 1013);
+      while (!success && attempts < 100) {
+        attempts++;
+        const rng = createSeededRNG(baseSeed + attempts * 1013);
 
-      newGrid = Array.from({ length: r }, () => Array(c).fill(-1));
-      newSnakes = [];
-      newActiveIds.clear();
+        newGrid = Array.from({ length: r }, () => Array(c).fill(-1));
+        newSnakes = [];
+        newActiveIds.clear();
 
-      let visited = Array.from({ length: r }, () => Array(c).fill(false));
-      let currentId = 1;
+        let visited = Array.from({ length: r }, () => Array(c).fill(false));
+        let currentId = 1;
 
-      for (let rowIdx = 0; rowIdx < r; rowIdx++) {
-        for (let colIdx = 0; colIdx < c; colIdx++) {
-          if (!visited[rowIdx][colIdx]) {
-            let targetLength = lengthPool[Math.floor(rng() * lengthPool.length)];
-            let path = carveContiguousSnake(colIdx, rowIdx, visited, targetLength, c, r, rng);
+        for (let rowIdx = 0; rowIdx < r; rowIdx++) {
+          for (let colIdx = 0; colIdx < c; colIdx++) {
+            if (!visited[rowIdx][colIdx]) {
+              let targetLength = lengthPool[Math.floor(rng() * lengthPool.length)];
+              let path = carveContiguousSnake(colIdx, rowIdx, visited, targetLength, c, r, rng);
 
-            if (path.length > 0) {
-              path.forEach((pt) => {
-                visited[pt.y][pt.x] = true;
-                newGrid[pt.y][pt.x] = currentId;
-              });
+              if (path.length > 0) {
+                path.forEach((pt) => {
+                  visited[pt.y][pt.x] = true;
+                  newGrid[pt.y][pt.x] = currentId;
+                });
 
-              newSnakes.push({
-                id: currentId,
-                cells: path,
-                headDir: { x: 0, y: -1 },
-                isSlithering: false,
-                slitherProgress: 0,
-                extendedPath: [],
-                shakeTimer: 0,
-              });
-              newActiveIds.add(currentId);
-              currentId++;
+                newSnakes.push({
+                  id: currentId,
+                  cells: path,
+                  headDir: { x: 0, y: -1 },
+                  isSlithering: false,
+                  slitherProgress: 0,
+                  extendedPath: [],
+                  shakeTimer: 0,
+                });
+                newActiveIds.add(currentId);
+                currentId++;
+              }
             }
           }
         }
+
+        absorbOrphansStrict(newSnakes, newGrid, newActiveIds);
+
+        if (orientSnakesWithDAG(newSnakes, newGrid, c, r)) {
+          success = true;
+        }
       }
 
-      absorbOrphansStrict(newSnakes, newGrid, newActiveIds);
-
-      if (orientSnakesWithDAG(newSnakes, newGrid, c, r)) {
-        success = true;
-      }
-    }
-
-    for (let s of newSnakes) {
-      let track = [...s.cells];
-      let curr = s.cells[s.cells.length - 1];
-      for (let i = 1; i <= Math.max(c, r) + 8; i++) {
-        track.push({
-          x: curr.x + s.headDir.x * i,
-          y: curr.y + s.headDir.y * i,
-        });
-      }
-      s.extendedPath = track;
-    }
-
-    // Restore in-progress cleared arrows if continuing the same level
-    const clearedSet = new Set<number>();
-    if (levelProgress && levelProgress.level === lvlToBuild) {
-      levelProgress.clearedSnakeIds.forEach((id) => {
-        clearedSet.add(id);
-        const snake = newSnakes.find((s) => s.id === id);
-        if (snake) {
-          snake.cells.forEach((pt) => {
-            newGrid[pt.y][pt.x] = -1;
+      // Build exit paths
+      for (let s of newSnakes) {
+        let track = [...s.cells];
+        let curr = s.cells[s.cells.length - 1];
+        for (let i = 1; i <= Math.max(c, r) + 8; i++) {
+          track.push({
+            x: curr.x + s.headDir.x * i,
+            y: curr.y + s.headDir.y * i,
           });
         }
-        newActiveIds.delete(id);
-      });
-    }
+        s.extendedPath = track;
+      }
 
-    snakesRef.current = newSnakes;
-    gridMapRef.current = newGrid;
-    activeIdsRef.current = newActiveIds;
-    hasTriggeredWinRef.current = false;
+      // Restore in-progress cleared arrows if continuing the same level
+      const clearedSet = new Set<number>();
+      if (levelProgress && levelProgress.level === lvlToBuild) {
+        levelProgress.clearedSnakeIds.forEach((id) => {
+          clearedSet.add(id);
+          const snake = newSnakes.find((s) => s.id === id);
+          if (snake) {
+            snake.cells.forEach((pt) => {
+              newGrid[pt.y][pt.x] = -1;
+            });
+          }
+          newActiveIds.delete(id);
+        });
+      }
 
-    const remainingCount = newSnakes.length - clearedSet.size;
-    setRemainingArrows(remainingCount);
-    setMoves(Math.max(config.baseMoves, remainingCount + 8));
-    setHintedId(null);
-    setShowConfetti(false);
-    setShowStreakScreen(false);
-    setVictory(false);
-    setGameOver(false);
-    setHearts(3);
-    setHintsAvailable(3);
-    setIsPrevLevelGreen(false);
-    setIsNextLevelBlue(false);
-    setPan({ x: 0, y: 0 });
-    setScale(1);
-  }, [currentLevelState]);
+      snakesRef.current = newSnakes;
+      gridMapRef.current = newGrid;
+      activeIdsRef.current = newActiveIds;
+      hasTriggeredWinRef.current = false;
+
+      const remainingCount = newSnakes.length - clearedSet.size;
+      setRemainingArrows(remainingCount);
+      setMoves(Math.max(config.baseMoves, remainingCount + 8));
+      setHintedId(null);
+      setShowConfetti(false);
+      setShowStreakScreen(false);
+      setVictory(false);
+      setGameOver(false);
+      setHearts(3);
+      setHintsAvailable(3);
+      setIsPrevLevelGreen(false);
+      setIsNextLevelBlue(false);
+      setPan({ x: 0, y: 0 });
+      setScale(1);
+    },
+    [currentLevelState, userSeed, levelProgress]
+  );
 
   useEffect(() => {
     setCurrentLevelState(level);
@@ -339,7 +345,6 @@ export default function GameScreen() {
     const isFirstToday = playedTodayBefore === 0;
 
     if (isFirstToday) {
-      // 1. Confetti bursts for 600ms, then Streak screen opens
       setTimeout(() => {
         setAnimatedStreakNum(currentStreak);
         streakZoomAnim.setValue(0);
@@ -347,14 +352,12 @@ export default function GameScreen() {
         streakNumBumpAnim.setValue(1);
         setShowStreakScreen(true);
 
-        // Entrance spring (0 -> 1)
         Animated.spring(streakZoomAnim, {
           toValue: 1,
           friction: 5,
           tension: 40,
           useNativeDriver: true,
         }).start(() => {
-          // Number counts up
           setTimeout(() => {
             setAnimatedStreakNum(currentStreak + 1);
             triggerHaptic("light");
@@ -363,7 +366,6 @@ export default function GameScreen() {
               Animated.spring(streakNumBumpAnim, { toValue: 1, friction: 3, tension: 50, useNativeDriver: true }),
             ]).start();
 
-            // Zoom in & Fade out
             setTimeout(() => {
               Animated.parallel([
                 Animated.timing(streakZoomAnim, {
@@ -385,29 +387,36 @@ export default function GameScreen() {
         });
       }, 600);
     } else {
-      // Not first level today -> Confetti bursts, then Next Level screen appears
       setTimeout(() => {
         openVictoryModal();
       }, 850);
     }
   };
 
-  // --- ANIMATION LOOP ---
-  useEffect(() => {
-    let animId: number;
-    const loop = () => {
-      let needsRedraw = false;
+  // --- HIGH-PERFORMANCE DELTA-TIME ANIMATION LOOP ---
+  const startAnimationLoop = useCallback(() => {
+    if (animFrameIdRef.current !== null) return;
+    lastFrameTimeRef.current = performance.now();
+
+    const loop = (currentTime: number) => {
+      const dt = Math.min((currentTime - lastFrameTimeRef.current) / 16.67, 2.5);
+      lastFrameTimeRef.current = currentTime;
+
+      let isMoving = false;
       const snakes = snakesRef.current;
       const activeIds = activeIdsRef.current;
 
-      for (let s of snakes) {
+      for (let i = 0; i < snakes.length; i++) {
+        const s = snakes[i];
         if (s.isSlithering) {
-          s.slitherProgress += 0.35;
-          needsRedraw = true;
+          s.slitherProgress += 0.34 * dt;
+          if (s.slitherProgress < s.extendedPath.length + 1) {
+            isMoving = true;
+          }
         }
         if (s.shakeTimer > 0) {
-          s.shakeTimer--;
-          needsRedraw = true;
+          s.shakeTimer -= dt;
+          isMoving = true;
         }
       }
 
@@ -422,15 +431,25 @@ export default function GameScreen() {
         }
       }
 
-      if (needsRedraw) {
-        setFrameTick((t) => (t + 1) % 1000);
+      setFrameTick((t) => (t + 1) % 1000);
+
+      if (isMoving) {
+        animFrameIdRef.current = requestAnimationFrame(loop);
+      } else {
+        animFrameIdRef.current = null;
       }
-      animId = requestAnimationFrame(loop);
     };
 
-    animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
+    animFrameIdRef.current = requestAnimationFrame(loop);
   }, [currentStreak]);
+
+  useEffect(() => {
+    return () => {
+      if (animFrameIdRef.current !== null) {
+        cancelAnimationFrame(animFrameIdRef.current);
+      }
+    };
+  }, []);
 
   // --- PRECISE ARROW HIT-TESTING ---
   const handleTap = (clientX: number, clientY: number) => {
@@ -440,27 +459,22 @@ export default function GameScreen() {
     const boardScreenLeft = (SCREEN_WIDTH - boardWidth * s) / 2 + p.x;
     const boardScreenTop = (SCREEN_HEIGHT - boardHeight * s) / 2 + p.y;
 
-    // Convert touch point to board local coordinates (unscaled)
     const touchBoardX = (clientX - boardScreenLeft) / s;
     const touchBoardY = (clientY - boardScreenTop) / s;
 
-    // Hit tolerance: touch must be directly on or very close to the arrow stroke
-    const hitTolerance = cellSize * 0.42;
-
+    const hitTolerance = cellSize * 0.44;
     let closestSnakeId: number | null = null;
     let minDistance = Infinity;
 
-    // Check distance to exact segments and arrowhead of every active arrow
-    for (const snake of snakesRef.current) {
+    for (let j = 0; j < snakesRef.current.length; j++) {
+      const snake = snakesRef.current[j];
       if (snake.isSlithering || !activeIdsRef.current.has(snake.id)) continue;
 
       let snakeMinDist = Infinity;
 
-      // 1. Distance to line segments
       for (let i = 1; i < snake.cells.length; i++) {
         const p1 = snake.cells[i - 1];
         const p2 = snake.cells[i];
-
         const x1 = (p1.x + 0.5) * cellSize;
         const y1 = (p1.y + 0.5) * cellSize;
         const x2 = (p2.x + 0.5) * cellSize;
@@ -470,21 +484,18 @@ export default function GameScreen() {
         if (d < snakeMinDist) snakeMinDist = d;
       }
 
-      // 2. Distance to arrowhead tip
       const head = snake.cells[snake.cells.length - 1];
       const hx = (head.x + 0.5) * cellSize;
       const hy = (head.y + 0.5) * cellSize;
       const headDist = Math.hypot(touchBoardX - hx, touchBoardY - hy);
       if (headDist < snakeMinDist) snakeMinDist = headDist;
 
-      // Check if tap was on this arrow
       if (snakeMinDist <= hitTolerance && snakeMinDist < minDistance) {
         minDistance = snakeMinDist;
         closestSnakeId = snake.id;
       }
     }
 
-    // Only trigger if an exact arrow was touched
     if (closestSnakeId !== null) {
       tapSnake(closestSnakeId);
     }
@@ -501,19 +512,20 @@ export default function GameScreen() {
         gridMapRef.current[pt.y][pt.x] = -1;
       });
       snake.isSlithering = true;
+      snake.slitherProgress = 0;
       activeIdsRef.current.delete(snake.id);
 
       const totalArrows = snakesRef.current.length;
       const remainingCount = activeIdsRef.current.size;
       setRemainingArrows(remainingCount);
 
-      // Collect all cleared snake IDs and persist to AsyncStorage
       const allClearedIds = snakesRef.current
         .filter((s) => !activeIdsRef.current.has(s.id))
         .map((s) => s.id);
       saveLevelProgress(currentLevelState, totalArrows, allClearedIds);
 
       if (hintedId === snake.id) setHintedId(null);
+      startAnimationLoop();
     } else {
       triggerHaptic("error");
       snake.shakeTimer = 8;
@@ -525,8 +537,8 @@ export default function GameScreen() {
         if (nextH <= 0) setGameOver(true);
         return Math.max(0, nextH);
       });
+      startAnimationLoop();
     }
-    setFrameTick((t) => (t + 1) % 1000);
   };
 
   const giveHint = () => {
@@ -674,15 +686,13 @@ export default function GameScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* FLOATING STATUS PILL (Hearts, Remaining, Difficulty) */}
+      {/* FLOATING STATUS PILL */}
       <View style={styles.floatingStatusWrapper} pointerEvents="box-none">
         <View style={[styles.statusPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {/* Arrows Remaining Count */}
           <View style={styles.movesTag}>
             <Ionicons name="navigate-outline" size={15} color="#3B82F6" />
-            <Text style={[styles.movesText, { color: colors.text }]}>
-              {remainingArrows}
-            </Text>
+            <Text style={[styles.movesText, { color: colors.text }]}>{remainingArrows}</Text>
           </View>
 
           {/* Hearts */}
@@ -754,10 +764,10 @@ export default function GameScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 1. CENTER CONFETTI BURST (Appears first upon untangling last arrow) */}
+      {/* 1. CENTER CONFETTI BURST */}
       {showConfetti && <CenterRadialConfetti />}
 
-      {/* 2. DEDICATED STREAK CELEBRATION SCREEN (Fire icon + number zoom & fade) */}
+      {/* 2. DEDICATED STREAK CELEBRATION SCREEN */}
       <Modal visible={showStreakScreen} transparent animationType="none">
         <View style={styles.streakOverlayContainer}>
           <Animated.View
@@ -785,7 +795,7 @@ export default function GameScreen() {
         </View>
       </Modal>
 
-      {/* 3. NEXT LEVEL SCREEN (Appears after confetti / streak sequence) */}
+      {/* 3. NEXT LEVEL SCREEN */}
       <Modal visible={victory} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -797,7 +807,6 @@ export default function GameScreen() {
 
             {/* LEVEL PROGRESSION ROW */}
             <View style={styles.levelTransitionRow}>
-              {/* Finished Level Badge (Turns Green) */}
               <View
                 style={[
                   styles.levelStepBadge,
@@ -816,14 +825,12 @@ export default function GameScreen() {
                 <Text style={styles.levelStepText}>Lvl {currentLevelState}</Text>
               </View>
 
-              {/* Arrow Indicator */}
               <Ionicons
                 name="arrow-forward"
                 size={20}
                 color={isNextLevelBlue ? "#3B82F6" : "#94A3B8"}
               />
 
-              {/* Next Level Badge (Turns from Gray to Blue) */}
               <View
                 style={[
                   styles.levelStepBadge,
@@ -848,7 +855,6 @@ export default function GameScreen() {
               </View>
             </View>
 
-            {/* NEXT LEVEL BUTTON */}
             <TouchableOpacity
               style={styles.modalButton}
               activeOpacity={0.8}
@@ -926,6 +932,7 @@ function renderStaticSnake(s: SnakeItem, cellSize: number, isHinted: boolean, is
   );
 }
 
+// Slithering Snake with robust directional tracking (No flicker)
 function renderSlitheringSnake(s: SnakeItem, cellSize: number) {
   const color = "#3B82F6";
   const strokeWidth = Math.max(3.5, cellSize * 0.2);
@@ -938,9 +945,25 @@ function renderSlitheringSnake(s: SnakeItem, cellSize: number) {
   if (subPath.length < 2) return null;
 
   const headPt = subPath[subPath.length - 1];
-  const prevPt = subPath[subPath.length - 2];
-  const dir = { x: headPt.x - prevPt.x, y: headPt.y - prevPt.y };
-  const mag = Math.hypot(dir.x, dir.y) || 1;
+
+  // Guaranteed solid heading calculation with fallback
+  let prevPt = subPath[subPath.length - 2];
+  let dir = { x: headPt.x - prevPt.x, y: headPt.y - prevPt.y };
+  let mag = Math.hypot(dir.x, dir.y);
+
+  let idx = subPath.length - 3;
+  while (mag < 0.0001 && idx >= 0) {
+    prevPt = subPath[idx];
+    dir = { x: headPt.x - prevPt.x, y: headPt.y - prevPt.y };
+    mag = Math.hypot(dir.x, dir.y);
+    idx--;
+  }
+
+  if (mag < 0.0001) {
+    dir = { x: s.headDir.x, y: s.headDir.y };
+    mag = Math.hypot(dir.x, dir.y) || 1;
+  }
+
   dir.x /= mag;
   dir.y /= mag;
 
@@ -996,15 +1019,6 @@ function renderArrowHead(x: number, y: number, dir: Point, size: number, color: 
   );
 }
 
-// Calculate perpendicular distance from a point to a line segment
-function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
-  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
-  if (l2 === 0) return Math.hypot(px - x1, py - y1);
-  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
-}
-
 function samplePolylineSegment(path: Point[], startDist: number, endDist: number): Point[] {
   let pts: Point[] = [];
   let currentDist = 0;
@@ -1036,7 +1050,15 @@ function samplePolylineSegment(path: Point[], startDist: number, endDist: number
   return pts;
 }
 
-// --- SEED-BASED CONTIGUOUS CARVER ---
+function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+  if (l2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+}
+
+// --- GENERATOR LOGIC ---
 function carveContiguousSnake(
   startX: number,
   startY: number,
