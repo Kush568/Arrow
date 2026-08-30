@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: my-app # Tells GitHub to run commands inside your 'my-app' folder
+        working-directory: my-app
     permissions:
       contents: read
       deployments: write
@@ -22,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: npm install
@@ -35,4 +35,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=arrowpuzzle # Your Cloudflare project name
+          workingDirectory: my-app
+          command: pages deploy dist --project-name=arrowpuzzle --commit-dirty=true
