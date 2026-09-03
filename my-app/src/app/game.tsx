@@ -10,6 +10,7 @@ import {
   Dimensions,
   Modal,
   Animated,
+  Platform,
 } from "react-native";
 import Svg, { Circle, Line, Polygon, G } from "react-native-svg";
 import { Ionicons, Feather } from "@expo/vector-icons";
@@ -42,10 +43,9 @@ interface SnakeItem {
   shakeTimer: number;
 }
 
-// Continuous level scaling with a big, challenging starting map on Level 1
 const getLevelConfig = (lvl: number) => {
-  const cols = Math.min(15, 8 + Math.floor((lvl - 1) / 2));
-  const rows = Math.min(20, 11 + Math.floor((lvl - 1) / 2));
+  const cols = Math.min(14, 7 + Math.floor((lvl - 1) / 3));
+  const rows = Math.min(18, 9 + Math.floor((lvl - 1) / 3));
   const baseMoves = Math.floor(cols * rows * 0.9);
 
   let difficulty = "Normal";
@@ -54,23 +54,23 @@ const getLevelConfig = (lvl: number) => {
   else if (lvl <= 15) difficulty = "Hard";
   else difficulty = "Ultra";
 
-  const maxLen = Math.min(10, 4 + Math.floor(lvl / 3));
+  const maxLen = Math.min(8, 4 + Math.floor(lvl / 4));
   const pool = Array.from({ length: maxLen - 1 }, (_, i) => i + 2);
 
   return { difficulty, cols, rows, baseMoves, pool };
 };
 
-// Center Radial Confetti Burst Component
+// Center Radial Confetti
 const CenterRadialConfetti = () => {
   const particles = useRef(
-    Array.from({ length: 40 }, (_, i) => {
-      const angle = (i / 40) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
-      const radius = 90 + Math.random() * 160;
+    Array.from({ length: 36 }, (_, i) => {
+      const angle = (i / 36) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
+      const radius = 80 + Math.random() * 150;
       return {
         dx: Math.cos(angle) * radius,
         dy: Math.sin(angle) * radius - 20,
         color: ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#FF7A00"][i % 7],
-        size: 7 + Math.random() * 7,
+        size: 7 + Math.random() * 6,
         anim: new Animated.Value(0),
       };
     })
@@ -83,14 +83,14 @@ const CenterRadialConfetti = () => {
         Animated.timing(p.anim, {
           toValue: 1,
           duration: 900,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== "web",
         })
       )
     ).start();
   }, []);
 
   return (
-    <View pointerEvents="none" style={styles.confettiCenterAnchor}>
+    <View style={styles.confettiCenterAnchor}>
       {particles.map((p, idx) => {
         const translateX = p.anim.interpolate({
           inputRange: [0, 1],
@@ -141,12 +141,14 @@ export default function GameScreen() {
     saveLevelProgress,
   } = useGame();
 
-  const [currentLevelState, setCurrentLevelState] = useState(level);
-  const { difficulty, cols, rows, baseMoves } = getLevelConfig(currentLevelState);
+  const currentLevelRef = useRef(level);
+  currentLevelRef.current = level;
 
-  const [moves, setMoves] = useState(baseMoves);
+  const { difficulty, cols, rows } = getLevelConfig(level);
+
   const [remainingArrows, setRemainingArrows] = useState(0);
   const [hearts, setHearts] = useState(3);
+  const heartsRef = useRef(3); // Synchronous tracker for persistent storage
   const [hintsAvailable, setHintsAvailable] = useState(3);
   const [hintedId, setHintedId] = useState<number | null>(null);
 
@@ -156,36 +158,35 @@ export default function GameScreen() {
   const [victory, setVictory] = useState(false);
   const [gameOver, setGameOver] = useState(false);
 
-  // Victory Progression Badges
   const [isPrevLevelGreen, setIsPrevLevelGreen] = useState(false);
   const [isNextLevelBlue, setIsNextLevelBlue] = useState(false);
   const [animatedStreakNum, setAnimatedStreakNum] = useState(currentStreak);
 
-  // Dedicated Streak Screen Zoom & Fade Animation
   const streakZoomAnim = useRef(new Animated.Value(0)).current;
   const streakOpacityAnim = useRef(new Animated.Value(1)).current;
   const streakNumBumpAnim = useRef(new Animated.Value(1)).current;
 
-  // Board Sizing
-  const cellSize = Math.max(22, Math.min(34, Math.floor((SCREEN_WIDTH - 24) / cols)));
+  // Board layout sizing
+  const cellSize = Math.max(28, Math.min(36, Math.floor((SCREEN_WIDTH - 24) / cols)));
   const boardWidth = cols * cellSize;
   const boardHeight = rows * cellSize;
 
-  // Pan & Zoom
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [scale, setScale] = useState(1);
+  // Camera State
+  const cameraRef = useRef({ x: 0, y: 0, scale: 1 });
+  const [camera, setCamera] = useState({ x: 0, y: 0, scale: 1 });
+  const containerLayoutRef = useRef({ width: SCREEN_WIDTH, height: SCREEN_HEIGHT, x: 0, y: 0 });
 
-  const panRef = useRef(pan);
-  panRef.current = pan;
-  const scaleRef = useRef(scale);
-  scaleRef.current = scale;
+  // Web HTML5 Canvas ref
+  const htmlCanvasRef = useRef<any>(null);
 
   const snakesRef = useRef<SnakeItem[]>([]);
   const gridMapRef = useRef<number[][]>([]);
   const activeIdsRef = useRef<Set<number>>(new Set());
   const hasTriggeredWinRef = useRef(false);
 
-  // High-performance render trigger
+  // Fast Tap Lock (Prevents duplicate touch/mouse synthesized events)
+  const lastTapTimeRef = useRef<number>(0);
+
   const [, setFrameTick] = useState(0);
   const animFrameIdRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
@@ -198,7 +199,6 @@ export default function GameScreen() {
     } catch {}
   };
 
-  // Seeded PRNG (Mulberry32)
   const createSeededRNG = (seedNumber: number) => {
     let s = (seedNumber ^ 0x6d2b79f5) >>> 0;
     return () => {
@@ -209,10 +209,156 @@ export default function GameScreen() {
     };
   };
 
+  // --- DRAWING ENGINE FOR HTML5 CANVAS (WEB) ---
+  const renderWebCanvas = useCallback(() => {
+    if (Platform.OS !== "web" || !htmlCanvasRef.current) return;
+    const canvasEl = htmlCanvasRef.current;
+    const ctx = canvasEl.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvasEl.getBoundingClientRect();
+    const cw = rect.width || containerLayoutRef.current.width;
+    const ch = rect.height || containerLayoutRef.current.height;
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+
+    if (canvasEl.width !== Math.round(cw * dpr) || canvasEl.height !== Math.round(ch * dpr)) {
+      canvasEl.width = Math.round(cw * dpr);
+      canvasEl.height = Math.round(ch * dpr);
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cw, ch);
+
+    const cam = cameraRef.current;
+    ctx.translate(cw / 2 + cam.x, ch / 2 + cam.y);
+    ctx.scale(cam.scale, cam.scale);
+    ctx.translate(-boardWidth / 2, -boardHeight / 2);
+
+    // 1. Grid Dots
+    ctx.fillStyle = isDark ? "#2A3142" : "#CBD5E1";
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cx = (c + 0.5) * cellSize;
+        const cy = (r + 0.5) * cellSize;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 2. Static Snakes
+    const snakes = snakesRef.current;
+    const activeIds = activeIdsRef.current;
+
+    for (let s of snakes) {
+      if (s.isSlithering || !activeIds.has(s.id)) continue;
+      const isHinted = hintedId === s.id;
+      const color = isHinted ? "#FF2A5F" : isDark ? "#F8FAFC" : "#0F172A";
+
+      let shakeX = 0, shakeY = 0;
+      if (s.shakeTimer > 0) {
+        shakeX = (Math.random() - 0.5) * 5;
+        shakeY = (Math.random() - 0.5) * 5;
+      }
+
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = Math.max(3.5, cellSize * 0.2);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      ctx.beginPath();
+      for (let i = 0; i < s.cells.length; i++) {
+        const px = (s.cells[i].x + 0.5) * cellSize + shakeX;
+        const py = (s.cells[i].y + 0.5) * cellSize + shakeY;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      const head = s.cells[s.cells.length - 1];
+      drawCanvasArrowHead(
+        ctx,
+        (head.x + 0.5) * cellSize + shakeX,
+        (head.y + 0.5) * cellSize + shakeY,
+        s.headDir,
+        cellSize * 0.42
+      );
+    }
+
+    // 3. Slithering Blue Snakes
+    for (let s of snakes) {
+      if (!s.isSlithering) continue;
+      const bodyLen = s.cells.length - 1;
+      const subPath = samplePolylineSegment(s.extendedPath, s.slitherProgress, bodyLen + s.slitherProgress);
+      if (subPath.length < 2) continue;
+
+      ctx.strokeStyle = "#3B82F6";
+      ctx.fillStyle = "#3B82F6";
+      ctx.lineWidth = Math.max(3.5, cellSize * 0.2);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      ctx.beginPath();
+      for (let i = 0; i < subPath.length; i++) {
+        const px = (subPath[i].x + 0.5) * cellSize;
+        const py = (subPath[i].y + 0.5) * cellSize;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      const headPt = subPath[subPath.length - 1];
+      let prevPt = subPath[subPath.length - 2];
+      let dir = { x: headPt.x - prevPt.x, y: headPt.y - prevPt.y };
+      let mag = Math.hypot(dir.x, dir.y);
+
+      let idx = subPath.length - 3;
+      while (mag < 0.0001 && idx >= 0) {
+        prevPt = subPath[idx];
+        dir = { x: headPt.x - prevPt.x, y: headPt.y - prevPt.y };
+        mag = Math.hypot(dir.x, dir.y);
+        idx--;
+      }
+      if (mag < 0.0001) {
+        dir = { x: s.headDir.x, y: s.headDir.y };
+        mag = Math.hypot(dir.x, dir.y) || 1;
+      }
+      dir.x /= mag;
+      dir.y /= mag;
+
+      drawCanvasArrowHead(ctx, (headPt.x + 0.5) * cellSize, (headPt.y + 0.5) * cellSize, dir, cellSize * 0.42);
+    }
+
+    ctx.restore();
+  }, [cellSize, cols, rows, boardWidth, boardHeight, isDark, hintedId]);
+
+  function drawCanvasArrowHead(ctx: any, x: number, y: number, dir: Point, size: number) {
+    ctx.save();
+    ctx.translate(x, y);
+    const angle = Math.atan2(dir.y, dir.x);
+    ctx.rotate(angle);
+
+    ctx.beginPath();
+    ctx.moveTo(size * 1.15, 0);
+    ctx.lineTo(-size * 0.7, -size * 0.8);
+    ctx.lineTo(-size * 0.2, 0);
+    ctx.lineTo(-size * 0.7, size * 0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   // --- GUARANTEED SOLVABLE LEVEL GENERATOR ---
   const generateLevel = useCallback(
-    (targetLvl?: number) => {
-      const lvlToBuild = targetLvl !== undefined ? targetLvl : currentLevelState;
+    (lvlToBuild: number) => {
+      if (animFrameIdRef.current !== null) {
+        cancelAnimationFrame(animFrameIdRef.current);
+        animFrameIdRef.current = null;
+      }
+
+      currentLevelRef.current = lvlToBuild;
       const config = getLevelConfig(lvlToBuild);
       const c = config.cols;
       const r = config.rows;
@@ -226,7 +372,7 @@ export default function GameScreen() {
 
       const baseSeed = ((userSeed ^ (lvlToBuild * 2654435761)) + (lvlToBuild * 9301 + 49297)) >>> 0;
 
-      while (!success && attempts < 100) {
+      while (!success && attempts < 150) {
         attempts++;
         const rng = createSeededRNG(baseSeed + attempts * 1013);
 
@@ -272,7 +418,6 @@ export default function GameScreen() {
         }
       }
 
-      // Build exit paths
       for (let s of newSnakes) {
         let track = [...s.cells];
         let curr = s.cells[s.cells.length - 1];
@@ -285,9 +430,14 @@ export default function GameScreen() {
         s.extendedPath = track;
       }
 
-      // Restore in-progress cleared arrows if continuing the same level
+      // Restore in-progress cleared arrows and remaining hearts
       const clearedSet = new Set<number>();
+      let restoredHearts = 3;
+
       if (levelProgress && levelProgress.level === lvlToBuild) {
+        if (typeof levelProgress.hearts === "number") {
+          restoredHearts = Math.max(1, levelProgress.hearts);
+        }
         levelProgress.clearedSnakeIds.forEach((id) => {
           clearedSet.add(id);
           const snake = newSnakes.find((s) => s.id === id);
@@ -307,35 +457,38 @@ export default function GameScreen() {
 
       const remainingCount = newSnakes.length - clearedSet.size;
       setRemainingArrows(remainingCount);
-      setMoves(Math.max(config.baseMoves, remainingCount + 8));
+      heartsRef.current = restoredHearts;
+      setHearts(restoredHearts);
       setHintedId(null);
       setShowConfetti(false);
       setShowStreakScreen(false);
       setVictory(false);
       setGameOver(false);
-      setHearts(3);
       setHintsAvailable(3);
       setIsPrevLevelGreen(false);
       setIsNextLevelBlue(false);
-      setPan({ x: 0, y: 0 });
-      setScale(1);
+
+      cameraRef.current = { x: 0, y: 0, scale: 1 };
+      setCamera({ x: 0, y: 0, scale: 1 });
+      renderWebCanvas();
     },
-    [currentLevelState, userSeed, levelProgress]
+    [userSeed, levelProgress, renderWebCanvas]
   );
 
   useEffect(() => {
-    setCurrentLevelState(level);
     generateLevel(level);
   }, [level]);
 
-  // Open the Next Level screen modal
+  useEffect(() => {
+    renderWebCanvas();
+  }, [camera, isDark, hintedId, renderWebCanvas]);
+
   const openVictoryModal = () => {
     setVictory(true);
     setTimeout(() => setIsPrevLevelGreen(true), 300);
     setTimeout(() => setIsNextLevelBlue(true), 700);
   };
 
-  // Run the full win sequence: Confetti -> Streak Zoom & Fade (if 1st level) -> Next Level screen
   const handleWinSequence = () => {
     setShowConfetti(true);
     triggerHaptic("success");
@@ -356,14 +509,14 @@ export default function GameScreen() {
           toValue: 1,
           friction: 5,
           tension: 40,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== "web",
         }).start(() => {
           setTimeout(() => {
             setAnimatedStreakNum(currentStreak + 1);
             triggerHaptic("light");
             Animated.sequence([
-              Animated.timing(streakNumBumpAnim, { toValue: 1.35, duration: 150, useNativeDriver: true }),
-              Animated.spring(streakNumBumpAnim, { toValue: 1, friction: 3, tension: 50, useNativeDriver: true }),
+              Animated.timing(streakNumBumpAnim, { toValue: 1.35, duration: 150, useNativeDriver: Platform.OS !== "web" }),
+              Animated.spring(streakNumBumpAnim, { toValue: 1, friction: 3, tension: 50, useNativeDriver: Platform.OS !== "web" }),
             ]).start();
 
             setTimeout(() => {
@@ -371,12 +524,12 @@ export default function GameScreen() {
                 Animated.timing(streakZoomAnim, {
                   toValue: 2.2,
                   duration: 550,
-                  useNativeDriver: true,
+                  useNativeDriver: Platform.OS !== "web",
                 }),
                 Animated.timing(streakOpacityAnim, {
                   toValue: 0,
                   duration: 550,
-                  useNativeDriver: true,
+                  useNativeDriver: Platform.OS !== "web",
                 }),
               ]).start(() => {
                 setShowStreakScreen(false);
@@ -393,7 +546,7 @@ export default function GameScreen() {
     }
   };
 
-  // --- HIGH-PERFORMANCE DELTA-TIME ANIMATION LOOP ---
+  // 60-120fps Hardware Delta-Time Animation Loop (Snappy 0.55 slither speed)
   const startAnimationLoop = useCallback(() => {
     if (animFrameIdRef.current !== null) return;
     lastFrameTimeRef.current = performance.now();
@@ -409,7 +562,7 @@ export default function GameScreen() {
       for (let i = 0; i < snakes.length; i++) {
         const s = snakes[i];
         if (s.isSlithering) {
-          s.slitherProgress += 0.34 * dt;
+          s.slitherProgress += 0.55 * dt; // Fast, snappy response
           if (s.slitherProgress < s.extendedPath.length + 1) {
             isMoving = true;
           }
@@ -431,7 +584,11 @@ export default function GameScreen() {
         }
       }
 
-      setFrameTick((t) => (t + 1) % 1000);
+      if (Platform.OS === "web") {
+        renderWebCanvas();
+      } else {
+        setFrameTick((t) => (t + 1) % 1000);
+      }
 
       if (isMoving) {
         animFrameIdRef.current = requestAnimationFrame(loop);
@@ -441,7 +598,7 @@ export default function GameScreen() {
     };
 
     animFrameIdRef.current = requestAnimationFrame(loop);
-  }, [currentStreak]);
+  }, [currentStreak, renderWebCanvas]);
 
   useEffect(() => {
     return () => {
@@ -451,18 +608,17 @@ export default function GameScreen() {
     };
   }, []);
 
-  // --- PRECISE ARROW HIT-TESTING ---
-  const handleTap = (clientX: number, clientY: number) => {
-    const p = panRef.current;
-    const s = scaleRef.current;
+  // --- PIXEL-PERFECT INVERSE CAMERA HIT TESTING (Fast 90ms Tap Lock) ---
+  const handleTap = (canvasX: number, canvasY: number, containerW: number, containerH: number) => {
+    const now = Date.now();
+    if (now - lastTapTimeRef.current < 90) return;
+    lastTapTimeRef.current = now;
 
-    const boardScreenLeft = (SCREEN_WIDTH - boardWidth * s) / 2 + p.x;
-    const boardScreenTop = (SCREEN_HEIGHT - boardHeight * s) / 2 + p.y;
+    const cam = cameraRef.current;
+    const boardLocalX = (canvasX - (containerW / 2 + cam.x)) / cam.scale + boardWidth / 2;
+    const boardLocalY = (canvasY - (containerH / 2 + cam.y)) / cam.scale + boardHeight / 2;
 
-    const touchBoardX = (clientX - boardScreenLeft) / s;
-    const touchBoardY = (clientY - boardScreenTop) / s;
-
-    const hitTolerance = cellSize * 0.44;
+    const hitTolerance = cellSize * 0.48;
     let closestSnakeId: number | null = null;
     let minDistance = Infinity;
 
@@ -480,14 +636,14 @@ export default function GameScreen() {
         const x2 = (p2.x + 0.5) * cellSize;
         const y2 = (p2.y + 0.5) * cellSize;
 
-        const d = distToSegment(touchBoardX, touchBoardY, x1, y1, x2, y2);
+        const d = distToSegment(boardLocalX, boardLocalY, x1, y1, x2, y2);
         if (d < snakeMinDist) snakeMinDist = d;
       }
 
       const head = snake.cells[snake.cells.length - 1];
       const hx = (head.x + 0.5) * cellSize;
       const hy = (head.y + 0.5) * cellSize;
-      const headDist = Math.hypot(touchBoardX - hx, touchBoardY - hy);
+      const headDist = Math.hypot(boardLocalX - hx, boardLocalY - hy);
       if (headDist < snakeMinDist) snakeMinDist = headDist;
 
       if (snakeMinDist <= hitTolerance && snakeMinDist < minDistance) {
@@ -507,7 +663,7 @@ export default function GameScreen() {
 
     const head = snake.cells[snake.cells.length - 1];
     if (isRayClear(head, snake.headDir, snake.id, gridMapRef.current, cols, rows)) {
-      triggerHaptic("light");
+      // (No vibration on valid release)
       snake.cells.forEach((pt) => {
         gridMapRef.current[pt.y][pt.x] = -1;
       });
@@ -522,21 +678,30 @@ export default function GameScreen() {
       const allClearedIds = snakesRef.current
         .filter((s) => !activeIdsRef.current.has(s.id))
         .map((s) => s.id);
-      saveLevelProgress(currentLevelState, totalArrows, allClearedIds);
+      saveLevelProgress(currentLevelRef.current, totalArrows, allClearedIds, heartsRef.current);
 
       if (hintedId === snake.id) setHintedId(null);
       startAnimationLoop();
     } else {
+      // Invalid blocked tap -> Deduct strictly 1 heart, error vibration, shake arrow & flash red
       triggerHaptic("error");
       snake.shakeTimer = 8;
       setFlashRed(true);
       setTimeout(() => setFlashRed(false), 240);
 
-      setHearts((h) => {
-        const nextH = h - 1;
-        if (nextH <= 0) setGameOver(true);
-        return Math.max(0, nextH);
-      });
+      const nextH = Math.max(0, heartsRef.current - 1);
+      heartsRef.current = nextH;
+      setHearts(nextH);
+
+      const totalArrows = snakesRef.current.length;
+      const allClearedIds = snakesRef.current
+        .filter((s) => !activeIdsRef.current.has(s.id))
+        .map((s) => s.id);
+      saveLevelProgress(currentLevelRef.current, totalArrows, allClearedIds, nextH);
+
+      if (nextH <= 0) {
+        setGameOver(true);
+      }
       startAnimationLoop();
     }
   };
@@ -550,7 +715,8 @@ export default function GameScreen() {
           triggerHaptic("light");
           setHintedId(s.id);
           setHintsAvailable((h) => h - 1);
-          setFrameTick((t) => (t + 1) % 1000);
+          if (Platform.OS === "web") renderWebCanvas();
+          else setFrameTick((t) => (t + 1) % 1000);
           return;
         }
       }
@@ -558,60 +724,203 @@ export default function GameScreen() {
   };
 
   const resetZoom = () => {
-    setPan({ x: 0, y: 0 });
-    setScale(1);
+    cameraRef.current = { x: 0, y: 0, scale: 1 };
+    setCamera({ x: 0, y: 0, scale: 1 });
+    renderWebCanvas();
   };
 
-  // Pan & Zoom Gesture Handler
-  const touchStartRef = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
-  const initialPinchDist = useRef<number | null>(null);
-  const initialScale = useRef<number>(1);
+  // --- MOBILE WEB TOUCH & PINCH-ZOOM CONTROLLER ---
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const canvasEl = htmlCanvasRef.current;
+    if (!canvasEl) return;
 
-  const panResponder = useRef(
+    let isPointerDown = false;
+    let startX = 0, startY = 0;
+    let initialCamX = 0, initialCamY = 0;
+    let initialPinch = 0;
+    let initialScale = 1;
+    let touchStartTime = 0;
+    let isTouchActive = false;
+
+    const onTouchStart = (e: TouchEvent) => {
+      isTouchActive = true;
+      if (e.touches.length === 1) {
+        isPointerDown = true;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        initialCamX = cameraRef.current.x;
+        initialCamY = cameraRef.current.y;
+        touchStartTime = Date.now();
+        initialPinch = 0;
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        initialPinch = Math.hypot(dx, dy) || 1;
+        initialScale = cameraRef.current.scale;
+        initialCamX = cameraRef.current.x;
+        initialCamY = cameraRef.current.y;
+        isPointerDown = false;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 1 && isPointerDown) {
+        const dx = e.touches[0].clientX - startX;
+        const dy = e.touches[0].clientY - startY;
+        cameraRef.current.x = initialCamX + dx;
+        cameraRef.current.y = initialCamY + dy;
+        renderWebCanvas();
+      } else if (e.touches.length === 2 && initialPinch > 0) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const currentPinch = Math.hypot(dx, dy);
+        const newScale = Math.min(Math.max(0.4, initialScale * (currentPinch / initialPinch)), 3.5);
+        cameraRef.current.scale = newScale;
+        renderWebCanvas();
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (isPointerDown && e.changedTouches.length === 1) {
+        const touch = e.changedTouches[0];
+        const dist = Math.hypot(touch.clientX - startX, touch.clientY - startY);
+        const elapsed = Date.now() - touchStartTime;
+
+        if (dist < 8 && elapsed < 350) {
+          const rect = canvasEl.getBoundingClientRect();
+          const clickX = touch.clientX - rect.left;
+          const clickY = touch.clientY - rect.top;
+          handleTap(clickX, clickY, rect.width, rect.height);
+        }
+      }
+      isPointerDown = false;
+      initialPinch = 0;
+      setCamera({ ...cameraRef.current });
+      setTimeout(() => { isTouchActive = false; }, 400);
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (isTouchActive) return;
+      isPointerDown = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      initialCamX = cameraRef.current.x;
+      initialCamY = cameraRef.current.y;
+      touchStartTime = Date.now();
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isPointerDown || isTouchActive) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      cameraRef.current.x = initialCamX + dx;
+      cameraRef.current.y = initialCamY + dy;
+      renderWebCanvas();
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (isTouchActive) return;
+      if (isPointerDown) {
+        const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+        const elapsed = Date.now() - touchStartTime;
+        if (dist < 6 && elapsed < 350) {
+          const rect = canvasEl.getBoundingClientRect();
+          const clickX = e.clientX - rect.left;
+          const clickY = e.clientY - rect.top;
+          handleTap(clickX, clickY, rect.width, rect.height);
+        }
+      }
+      isPointerDown = false;
+      setCamera({ ...cameraRef.current });
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+      const newScale = Math.min(Math.max(0.4, cameraRef.current.scale * zoomFactor), 3.5);
+      cameraRef.current.scale = newScale;
+      setCamera({ ...cameraRef.current });
+      renderWebCanvas();
+    };
+
+    canvasEl.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvasEl.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvasEl.addEventListener("touchend", onTouchEnd, { passive: false });
+    canvasEl.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    canvasEl.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      canvasEl.removeEventListener("touchstart", onTouchStart);
+      canvasEl.removeEventListener("touchmove", onTouchMove);
+      canvasEl.removeEventListener("touchend", onTouchEnd);
+      canvasEl.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      canvasEl.removeEventListener("wheel", onWheel);
+    };
+  }, [renderWebCanvas]);
+
+  // Native PanResponder for standalone mobile apps
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef<number>(1);
+  const nativeTouchStartRef = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
+
+  const nativePanResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => Platform.OS !== "web",
+      onMoveShouldSetPanResponder: () => Platform.OS !== "web",
       onPanResponderGrant: (evt) => {
-        const touches = evt.nativeEvent.touches;
+        const touches = evt.nativeEvent.touches || [evt.nativeEvent];
         if (touches.length === 1) {
-          touchStartRef.current = {
+          nativeTouchStartRef.current = {
             x: touches[0].pageX,
             y: touches[0].pageY,
             time: Date.now(),
           };
-          initialPinchDist.current = null;
+          panStartRef.current = { x: cameraRef.current.x, y: cameraRef.current.y };
+          pinchStartDistRef.current = null;
         } else if (touches.length === 2) {
           const dx = touches[0].pageX - touches[1].pageX;
           const dy = touches[0].pageY - touches[1].pageY;
-          initialPinchDist.current = Math.hypot(dx, dy);
-          initialScale.current = scaleRef.current;
+          pinchStartDistRef.current = Math.hypot(dx, dy) || 1;
+          pinchStartScaleRef.current = cameraRef.current.scale;
+          panStartRef.current = { x: cameraRef.current.x, y: cameraRef.current.y };
         }
       },
       onPanResponderMove: (evt, gestureState) => {
-        const touches = evt.nativeEvent.touches;
-        if (touches.length === 1 && !initialPinchDist.current) {
-          setPan({
-            x: panRef.current.x + gestureState.dx * 0.12,
-            y: panRef.current.y + gestureState.dy * 0.12,
-          });
-        } else if (touches.length === 2 && initialPinchDist.current) {
+        const touches = evt.nativeEvent.touches || [evt.nativeEvent];
+        if (touches.length === 1 && !pinchStartDistRef.current) {
+          cameraRef.current.x = panStartRef.current.x + gestureState.dx;
+          cameraRef.current.y = panStartRef.current.y + gestureState.dy;
+          setCamera({ ...cameraRef.current });
+        } else if (touches.length === 2 && pinchStartDistRef.current) {
           const dx = touches[0].pageX - touches[1].pageX;
           const dy = touches[0].pageY - touches[1].pageY;
           const currentDist = Math.hypot(dx, dy);
           const newScale = Math.min(
-            Math.max(0.65, (currentDist / initialPinchDist.current) * initialScale.current),
-            2.3
+            Math.max(0.4, pinchStartScaleRef.current * (currentDist / pinchStartDistRef.current)),
+            3.5
           );
-          setScale(newScale);
+          cameraRef.current.scale = newScale;
+          setCamera({ ...cameraRef.current });
         }
       },
       onPanResponderRelease: (evt, gestureState) => {
         const distMoved = Math.hypot(gestureState.dx, gestureState.dy);
-        const timeDiff = Date.now() - touchStartRef.current.time;
-        if (distMoved < 10 && timeDiff < 300) {
-          handleTap(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        const timeDiff = Date.now() - nativeTouchStartRef.current.time;
+        if (distMoved < 8 && timeDiff < 320) {
+          const pageX = evt.nativeEvent.pageX || nativeTouchStartRef.current.x;
+          const pageY = evt.nativeEvent.pageY || nativeTouchStartRef.current.y;
+          const layout = containerLayoutRef.current;
+          handleTap(pageX - layout.x, pageY - layout.y, layout.width, layout.height);
         }
-        initialPinchDist.current = null;
+        pinchStartDistRef.current = null;
       },
     })
   ).current;
@@ -620,49 +929,66 @@ export default function GameScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
       <StatusBar barStyle={colors.statusBarStyle} backgroundColor={colors.bg} />
 
-      {/* Red flash effect on life lost */}
-      {flashRed && <View pointerEvents="none" style={styles.redFlashOverlay} />}
+      {flashRed && <View style={[styles.redFlashOverlay, { pointerEvents: "none" }]} />}
 
-      {/* FULL-SCREEN DRAGGABLE & ZOOMABLE CANVAS */}
-      <View style={styles.fullScreenBoard} {...panResponder.panHandlers}>
-        <Svg width={SCREEN_WIDTH} height={SCREEN_HEIGHT} style={styles.svgContainer}>
-          <G
-            transform={`translate(${
-              (SCREEN_WIDTH - boardWidth * scale) / 2 + pan.x
-            }, ${
-              (SCREEN_HEIGHT - boardHeight * scale) / 2 + pan.y
-            }) scale(${scale})`}
-          >
-            {/* Background Grid Dots */}
-            {Array.from({ length: rows }).map((_, r) =>
-              Array.from({ length: cols }).map((_, c) => (
-                <Circle
-                  key={`dot-${r}-${c}`}
-                  cx={(c + 0.5) * cellSize}
-                  cy={(r + 0.5) * cellSize}
-                  r={2.6}
-                  fill={isDark ? "#2A3142" : "#CBD5E1"}
-                />
-              ))
-            )}
+      {/* FULL-SCREEN INFINITE CANVAS STAGE */}
+      <View
+        style={[styles.fullScreenBoard, { backgroundColor: colors.bg }]}
+        {...(Platform.OS !== "web" ? nativePanResponder.panHandlers : {})}
+        onLayout={(e) => {
+          containerLayoutRef.current = e.nativeEvent.layout;
+          renderWebCanvas();
+        }}
+      >
+        {Platform.OS === "web" ? (
+          <canvas
+            ref={htmlCanvasRef}
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+              touchAction: "none",
+              userSelect: "none",
+              cursor: "pointer",
+            }}
+          />
+        ) : (
+          <Svg width={SCREEN_WIDTH} height={SCREEN_HEIGHT} style={styles.svgContainer}>
+            <G
+              transform={`translate(${
+                containerLayoutRef.current.width / 2 + camera.x
+              }, ${
+                containerLayoutRef.current.height / 2 + camera.y
+              }) scale(${camera.scale}) translate(${-boardWidth / 2}, ${-boardHeight / 2})`}
+            >
+              {Array.from({ length: rows }).map((_, r) =>
+                Array.from({ length: cols }).map((_, c) => (
+                  <Circle
+                    key={`dot-${r}-${c}`}
+                    cx={(c + 0.5) * cellSize}
+                    cy={(r + 0.5) * cellSize}
+                    r={2.6}
+                    fill={isDark ? "#2A3142" : "#CBD5E1"}
+                  />
+                ))
+              )}
 
-            {/* Static Arrows */}
-            {snakesRef.current.map((s) => {
-              if (s.isSlithering || !activeIdsRef.current.has(s.id)) return null;
-              return renderStaticSnake(s, cellSize, hintedId === s.id, isDark);
-            })}
+              {snakesRef.current.map((s) => {
+                if (s.isSlithering || !activeIdsRef.current.has(s.id)) return null;
+                return renderStaticSnake(s, cellSize, hintedId === s.id, isDark);
+              })}
 
-            {/* Slithering Blue Animated Arrows */}
-            {snakesRef.current.map((s) => {
-              if (!s.isSlithering) return null;
-              return renderSlitheringSnake(s, cellSize);
-            })}
-          </G>
-        </Svg>
+              {snakesRef.current.map((s) => {
+                if (!s.isSlithering) return null;
+                return renderSlitheringSnake(s, cellSize);
+              })}
+            </G>
+          </Svg>
+        )}
       </View>
 
       {/* FLOATING TOP BAR */}
-      <View style={styles.floatingTopBar} pointerEvents="box-none">
+      <View style={[styles.floatingTopBar, { pointerEvents: "box-none" }]}>
         <TouchableOpacity
           style={[styles.floatingRoundBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
           activeOpacity={0.7}
@@ -672,30 +998,26 @@ export default function GameScreen() {
         </TouchableOpacity>
 
         <View style={[styles.floatingLevelBadge, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.levelTitleText, { color: colors.text }]}>
-            Level {currentLevelState}
-          </Text>
+          <Text style={[styles.levelTitleText, { color: colors.text }]}>Level {level}</Text>
         </View>
 
         <TouchableOpacity
           style={[styles.floatingRoundBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
           activeOpacity={0.7}
-          onPress={() => generateLevel(currentLevelState)}
+          onPress={() => generateLevel(level)}
         >
           <Ionicons name="refresh-outline" size={22} color={colors.text} />
         </TouchableOpacity>
       </View>
 
       {/* FLOATING STATUS PILL */}
-      <View style={styles.floatingStatusWrapper} pointerEvents="box-none">
+      <View style={[styles.floatingStatusWrapper, { pointerEvents: "box-none" }]}>
         <View style={[styles.statusPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {/* Arrows Remaining Count */}
           <View style={styles.movesTag}>
             <Ionicons name="navigate-outline" size={15} color="#3B82F6" />
             <Text style={[styles.movesText, { color: colors.text }]}>{remainingArrows}</Text>
           </View>
 
-          {/* Hearts */}
           <View style={styles.heartsRow}>
             {[1, 2, 3].map((h) => (
               <Ionicons
@@ -707,7 +1029,6 @@ export default function GameScreen() {
             ))}
           </View>
 
-          {/* Difficulty Tag */}
           <View
             style={[
               styles.modeTag,
@@ -740,8 +1061,8 @@ export default function GameScreen() {
         </View>
       </View>
 
-      {/* FLOATING BOTTOM ACTION BUTTONS */}
-      <View style={styles.floatingBottomControls} pointerEvents="box-none">
+      {/* FLOATING BOTTOM BUTTONS */}
+      <View style={[styles.floatingBottomControls, { pointerEvents: "box-none" }]}>
         <TouchableOpacity
           style={[styles.circleActionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
           activeOpacity={0.8}
@@ -764,10 +1085,10 @@ export default function GameScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 1. CENTER CONFETTI BURST */}
+      {/* CENTER CONFETTI BURST */}
       {showConfetti && <CenterRadialConfetti />}
 
-      {/* 2. DEDICATED STREAK CELEBRATION SCREEN */}
+      {/* DEDICATED STREAK CELEBRATION */}
       <Modal visible={showStreakScreen} transparent animationType="none">
         <View style={styles.streakOverlayContainer}>
           <Animated.View
@@ -795,7 +1116,7 @@ export default function GameScreen() {
         </View>
       </Modal>
 
-      {/* 3. NEXT LEVEL SCREEN */}
+      {/* NEXT LEVEL MODAL */}
       <Modal visible={victory} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -805,7 +1126,6 @@ export default function GameScreen() {
 
             <Text style={[styles.modalTitle, { color: colors.text }]}>Level Cleared</Text>
 
-            {/* LEVEL PROGRESSION ROW */}
             <View style={styles.levelTransitionRow}>
               <View
                 style={[
@@ -822,7 +1142,7 @@ export default function GameScreen() {
                   color="#FFFFFF"
                   style={{ marginRight: 4 }}
                 />
-                <Text style={styles.levelStepText}>Lvl {currentLevelState}</Text>
+                <Text style={styles.levelStepText}>Lvl {level}</Text>
               </View>
 
               <Ionicons
@@ -850,7 +1170,7 @@ export default function GameScreen() {
                     { color: isNextLevelBlue ? "#FFFFFF" : isDark ? "#64748B" : "#94A3B8" },
                   ]}
                 >
-                  Lvl {currentLevelState + 1}
+                  Lvl {level + 1}
                 </Text>
               </View>
             </View>
@@ -859,10 +1179,7 @@ export default function GameScreen() {
               style={styles.modalButton}
               activeOpacity={0.8}
               onPress={async () => {
-                const nextLvl = currentLevelState + 1;
                 await completeLevel();
-                setCurrentLevelState(nextLvl);
-                generateLevel(nextLvl);
               }}
             >
               <Text style={styles.modalButtonText}>Next Level</Text>
@@ -885,7 +1202,7 @@ export default function GameScreen() {
             <TouchableOpacity
               style={[styles.modalButton, { backgroundColor: "#EF4444" }]}
               activeOpacity={0.8}
-              onPress={() => generateLevel(currentLevelState)}
+              onPress={() => generateLevel(level)}
             >
               <Text style={styles.modalButtonText}>Try Again</Text>
             </TouchableOpacity>
@@ -896,7 +1213,7 @@ export default function GameScreen() {
   );
 }
 
-// --- RENDER HELPERS ---
+// Native Render Helpers (Mobile App)
 function renderStaticSnake(s: SnakeItem, cellSize: number, isHinted: boolean, isDark: boolean) {
   const shakeX = s.shakeTimer > 0 ? (Math.random() - 0.5) * 6 : 0;
   const shakeY = s.shakeTimer > 0 ? (Math.random() - 0.5) * 6 : 0;
@@ -932,7 +1249,6 @@ function renderStaticSnake(s: SnakeItem, cellSize: number, isHinted: boolean, is
   );
 }
 
-// Slithering Snake with robust directional tracking (No flicker)
 function renderSlitheringSnake(s: SnakeItem, cellSize: number) {
   const color = "#3B82F6";
   const strokeWidth = Math.max(3.5, cellSize * 0.2);
@@ -945,8 +1261,6 @@ function renderSlitheringSnake(s: SnakeItem, cellSize: number) {
   if (subPath.length < 2) return null;
 
   const headPt = subPath[subPath.length - 1];
-
-  // Guaranteed solid heading calculation with fallback
   let prevPt = subPath[subPath.length - 2];
   let dir = { x: headPt.x - prevPt.x, y: headPt.y - prevPt.y };
   let mag = Math.hypot(dir.x, dir.y);
@@ -1058,7 +1372,7 @@ function distToSegment(px: number, py: number, x1: number, y1: number, x2: numbe
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
 }
 
-// --- GENERATOR LOGIC ---
+// --- GUARANTEED PARTITION GENERATOR ---
 function carveContiguousSnake(
   startX: number,
   startY: number,
@@ -1113,6 +1427,7 @@ function absorbOrphansStrict(snakes: SnakeItem[], gridMap: number[][], activeIds
         if (target.id === s.id) continue;
         let head = target.cells[target.cells.length - 1];
         let tail = target.cells[0];
+
         if (Math.abs(pt.x - head.x) + Math.abs(pt.y - head.y) === 1) {
           target.cells.push(pt);
           gridMap[pt.y][pt.x] = target.id;
@@ -1126,6 +1441,23 @@ function absorbOrphansStrict(snakes: SnakeItem[], gridMap: number[][], activeIds
           break;
         }
       }
+
+      if (!absorbed) {
+        for (let target of snakes) {
+          if (target.id === s.id) continue;
+          for (let k = 0; k < target.cells.length; k++) {
+            let cell = target.cells[k];
+            if (Math.abs(pt.x - cell.x) + Math.abs(pt.y - cell.y) === 1) {
+              target.cells.splice(k + 1, 0, pt);
+              gridMap[pt.y][pt.x] = target.id;
+              absorbed = true;
+              break;
+            }
+          }
+          if (absorbed) break;
+        }
+      }
+
       if (absorbed) {
         snakes.splice(i, 1);
         activeIds.delete(s.id);
@@ -1141,6 +1473,8 @@ function orientSnakesWithDAG(snakes: SnakeItem[], gridMap: number[][], cols: num
   while (unassigned.size > 0) {
     let foundClear = false;
     for (let s of unassigned) {
+      if (s.cells.length < 2) continue;
+
       let dirA = getEndpointDir(s.cells, s.cells.length - 1, s.cells.length - 2);
       if (isRayClear(s.cells[s.cells.length - 1], dirA, s.id, tempGrid, cols, rows)) {
         s.headDir = dirA;
@@ -1151,6 +1485,7 @@ function orientSnakesWithDAG(snakes: SnakeItem[], gridMap: number[][], cols: num
         foundClear = true;
         break;
       }
+
       let dirB = getEndpointDir(s.cells, 0, 1);
       if (isRayClear(s.cells[0], dirB, s.id, tempGrid, cols, rows)) {
         s.cells.reverse();
@@ -1208,10 +1543,10 @@ function isRayClear(
   return true;
 }
 
-// --- STYLES ---
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    overflow: "hidden",
   },
   redFlashOverlay: {
     position: "absolute",
@@ -1223,13 +1558,9 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
   fullScreenBoard: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: "center",
-    alignItems: "center",
+    ...StyleSheet.absoluteFillObject,
+    overflow: "hidden",
+    ...(Platform.OS === "web" ? { touchAction: "none", userSelect: "none" } : {}),
   },
   svgContainer: {
     flex: 1,
@@ -1366,6 +1697,7 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     alignItems: "center",
     justifyContent: "center",
+    pointerEvents: "none",
   },
   streakOverlayContainer: {
     flex: 1,
@@ -1454,11 +1786,6 @@ const styles = StyleSheet.create({
   levelStepText: {
     fontSize: 14,
     fontWeight: "800",
-  },
-  modalSubtext: {
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 20,
   },
   modalButton: {
     backgroundColor: "#3B82F6",

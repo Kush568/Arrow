@@ -1,5 +1,5 @@
+import React, { createContext, useContext, useState, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useContext, useEffect, useState } from "react";
 
 export const formatDateKey = (date: Date): string => {
   const y = date.getFullYear();
@@ -9,13 +9,14 @@ export const formatDateKey = (date: Date): string => {
 };
 
 type PlayHistory = {
-  [dateKey: string]: number; // e.g. "2026-08-25": 4
+  [dateKey: string]: number;
 };
 
 export type LevelProgress = {
   level: number;
   totalArrows: number;
   clearedSnakeIds: number[];
+  hearts: number;
 };
 
 type GameContextType = {
@@ -25,7 +26,7 @@ type GameContextType = {
   bestStreak: number;
   playHistory: PlayHistory;
   levelProgress: LevelProgress | null;
-  saveLevelProgress: (level: number, totalArrows: number, clearedSnakeIds: number[]) => Promise<void>;
+  saveLevelProgress: (level: number, totalArrows: number, clearedSnakeIds: number[], hearts: number) => void;
   clearLevelProgress: () => Promise<void>;
   completeLevel: () => Promise<void>;
   getGamesForDate: (dateKey: string) => number;
@@ -39,7 +40,7 @@ const GameContext = createContext<GameContextType>({
   bestStreak: 0,
   playHistory: {},
   levelProgress: null,
-  saveLevelProgress: async () => {},
+  saveLevelProgress: () => {},
   clearLevelProgress: async () => {},
   completeLevel: async () => {},
   getGamesForDate: () => 0,
@@ -54,7 +55,6 @@ const STORAGE_KEYS = {
   LEVEL_PROGRESS: "@game_level_progress",
 };
 
-// Accurate streak calculation based on consecutive active days
 const calculateStreak = (history: PlayHistory): number => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -69,7 +69,6 @@ const calculateStreak = (history: PlayHistory): number => {
     streak = 1;
     checkDate.setDate(checkDate.getDate() - 1);
   } else {
-    // Check if played yesterday (streak is preserved for today)
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayKey = formatDateKey(yesterday);
@@ -78,11 +77,10 @@ const calculateStreak = (history: PlayHistory): number => {
       checkDate = new Date(yesterday);
       checkDate.setDate(checkDate.getDate() - 1);
     } else {
-      return 0; // Streak broken
+      return 0;
     }
   }
 
-  // Count backwards day by day
   while (true) {
     const key = formatDateKey(checkDate);
     if ((history[key] || 0) > 0) {
@@ -104,26 +102,19 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [bestStreak, setBestStreak] = useState(0);
   const [levelProgress, setLevelProgress] = useState<LevelProgress | null>(null);
 
-  // Load persistent data on start
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [savedLevel, savedHistory, savedBest, savedUserSeed, savedProgress] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.LEVEL),
-          AsyncStorage.getItem(STORAGE_KEYS.HISTORY),
-          AsyncStorage.getItem(STORAGE_KEYS.BEST_STREAK),
-          AsyncStorage.getItem(STORAGE_KEYS.USER_SEED),
-          AsyncStorage.getItem(STORAGE_KEYS.LEVEL_PROGRESS),
-        ]);
-
-        if (savedProgress) {
-          try {
-            setLevelProgress(JSON.parse(savedProgress));
-          } catch {}
-        }
+        const [savedLevel, savedHistory, savedBest, savedUserSeed, savedProgress] =
+          await Promise.all([
+            AsyncStorage.getItem(STORAGE_KEYS.LEVEL),
+            AsyncStorage.getItem(STORAGE_KEYS.HISTORY),
+            AsyncStorage.getItem(STORAGE_KEYS.BEST_STREAK),
+            AsyncStorage.getItem(STORAGE_KEYS.USER_SEED),
+            AsyncStorage.getItem(STORAGE_KEYS.LEVEL_PROGRESS),
+          ]);
 
         let seed = savedUserSeed ? parseInt(savedUserSeed, 10) : 0;
-        // Generate unique random seed for this user on first launch
         if (!seed) {
           seed = Math.floor(Math.random() * 2147483647) + 1;
           await AsyncStorage.setItem(STORAGE_KEYS.USER_SEED, seed.toString());
@@ -140,24 +131,33 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         const calculatedStreak = calculateStreak(parsedHistory);
         setCurrentStreak(calculatedStreak);
         setBestStreak(Math.max(parsedBest, calculatedStreak));
+
+        if (savedProgress) {
+          try {
+            const parsed: LevelProgress = JSON.parse(savedProgress);
+            if (parsed && parsed.level === parsedLevel) {
+              setLevelProgress(parsed);
+            }
+          } catch {}
+        }
       } catch (err) {
-        console.error("Failed to load game data", err);
+        console.error("Load game data error", err);
       }
     };
 
     loadData();
   }, []);
 
-  const saveLevelProgress = async (lvl: number, total: number, clearedIds: number[]) => {
+  // Save progress instantly including remaining hearts
+  const saveLevelProgress = (lvl: number, total: number, clearedIds: number[], currentHearts: number) => {
     const progress: LevelProgress = {
       level: lvl,
       totalArrows: total,
       clearedSnakeIds: clearedIds,
+      hearts: currentHearts,
     };
     setLevelProgress(progress);
-    try {
-      await AsyncStorage.setItem(STORAGE_KEYS.LEVEL_PROGRESS, JSON.stringify(progress));
-    } catch {}
+    AsyncStorage.setItem(STORAGE_KEYS.LEVEL_PROGRESS, JSON.stringify(progress)).catch(() => {});
   };
 
   const clearLevelProgress = async () => {
@@ -167,7 +167,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   };
 
-  // Called whenever the player wins a level in game.tsx
   const completeLevel = async () => {
     try {
       const todayKey = formatDateKey(new Date());
@@ -193,7 +192,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.removeItem(STORAGE_KEYS.LEVEL_PROGRESS),
       ]);
     } catch (err) {
-      console.error("Failed to save completed level", err);
+      console.error("Complete level error", err);
     }
   };
 
@@ -215,7 +214,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setBestStreak(0);
       setLevelProgress(null);
     } catch (err) {
-      console.error("Failed to reset game data", err);
+      console.error("Reset data error", err);
     }
   };
 
