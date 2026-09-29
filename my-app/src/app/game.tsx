@@ -60,7 +60,7 @@ const getLevelConfig = (lvl: number) => {
   return { difficulty, cols, rows, baseMoves, pool };
 };
 
-// Center Radial Confetti
+// Center Radial Confetti Component
 const CenterRadialConfetti = () => {
   const particles = useRef(
     Array.from({ length: 36 }, (_, i) => {
@@ -148,8 +148,9 @@ export default function GameScreen() {
 
   const [remainingArrows, setRemainingArrows] = useState(0);
   const [hearts, setHearts] = useState(3);
-  const heartsRef = useRef(3); // Synchronous tracker for persistent storage
+  const heartsRef = useRef(3); // Synchronous tracker for hearts persistence
   const [hintsAvailable, setHintsAvailable] = useState(3);
+  const hintsRef = useRef(3); // Synchronous tracker for hints persistence
   const [hintedId, setHintedId] = useState<number | null>(null);
 
   const [flashRed, setFlashRed] = useState(false);
@@ -171,7 +172,7 @@ export default function GameScreen() {
   const boardWidth = cols * cellSize;
   const boardHeight = rows * cellSize;
 
-  // Camera State
+  // Camera State (Infinite Pan & Smooth Zoom)
   const cameraRef = useRef({ x: 0, y: 0, scale: 1 });
   const [camera, setCamera] = useState({ x: 0, y: 0, scale: 1 });
   const containerLayoutRef = useRef({ width: SCREEN_WIDTH, height: SCREEN_HEIGHT, x: 0, y: 0 });
@@ -430,13 +431,17 @@ export default function GameScreen() {
         s.extendedPath = track;
       }
 
-      // Restore in-progress cleared arrows and remaining hearts
+      // Restore in-progress cleared arrows, remaining hearts, and hints
       const clearedSet = new Set<number>();
       let restoredHearts = 3;
+      let restoredHints = 3;
 
       if (levelProgress && levelProgress.level === lvlToBuild) {
         if (typeof levelProgress.hearts === "number") {
           restoredHearts = Math.max(1, levelProgress.hearts);
+        }
+        if (typeof levelProgress.hints === "number") {
+          restoredHints = Math.max(0, levelProgress.hints);
         }
         levelProgress.clearedSnakeIds.forEach((id) => {
           clearedSet.add(id);
@@ -459,12 +464,13 @@ export default function GameScreen() {
       setRemainingArrows(remainingCount);
       heartsRef.current = restoredHearts;
       setHearts(restoredHearts);
+      hintsRef.current = restoredHints;
+      setHintsAvailable(restoredHints);
       setHintedId(null);
       setShowConfetti(false);
       setShowStreakScreen(false);
       setVictory(false);
       setGameOver(false);
-      setHintsAvailable(3);
       setIsPrevLevelGreen(false);
       setIsNextLevelBlue(false);
 
@@ -675,10 +681,17 @@ export default function GameScreen() {
       const remainingCount = activeIdsRef.current.size;
       setRemainingArrows(remainingCount);
 
+      // Save exact progress, hearts & hints synchronously
       const allClearedIds = snakesRef.current
         .filter((s) => !activeIdsRef.current.has(s.id))
         .map((s) => s.id);
-      saveLevelProgress(currentLevelRef.current, totalArrows, allClearedIds, heartsRef.current);
+      saveLevelProgress(
+        currentLevelRef.current,
+        totalArrows,
+        allClearedIds,
+        heartsRef.current,
+        hintsRef.current
+      );
 
       if (hintedId === snake.id) setHintedId(null);
       startAnimationLoop();
@@ -697,7 +710,13 @@ export default function GameScreen() {
       const allClearedIds = snakesRef.current
         .filter((s) => !activeIdsRef.current.has(s.id))
         .map((s) => s.id);
-      saveLevelProgress(currentLevelRef.current, totalArrows, allClearedIds, nextH);
+      saveLevelProgress(
+        currentLevelRef.current,
+        totalArrows,
+        allClearedIds,
+        nextH,
+        hintsRef.current
+      );
 
       if (nextH <= 0) {
         setGameOver(true);
@@ -707,14 +726,30 @@ export default function GameScreen() {
   };
 
   const giveHint = () => {
-    if (hintsAvailable <= 0) return;
+    if (hintsRef.current <= 0) return;
     for (let s of snakesRef.current) {
       if (activeIdsRef.current.has(s.id) && !s.isSlithering) {
         const head = s.cells[s.cells.length - 1];
         if (isRayClear(head, s.headDir, s.id, gridMapRef.current, cols, rows)) {
           triggerHaptic("light");
+          const nextHints = Math.max(0, hintsRef.current - 1);
+          hintsRef.current = nextHints;
+          setHintsAvailable(nextHints);
+
+          // Save remaining hints to storage immediately
+          const totalArrows = snakesRef.current.length;
+          const allClearedIds = snakesRef.current
+            .filter((s) => !activeIdsRef.current.has(s.id))
+            .map((s) => s.id);
+          saveLevelProgress(
+            currentLevelRef.current,
+            totalArrows,
+            allClearedIds,
+            heartsRef.current,
+            nextHints
+          );
+
           setHintedId(s.id);
-          setHintsAvailable((h) => h - 1);
           if (Platform.OS === "web") renderWebCanvas();
           else setFrameTick((t) => (t + 1) % 1000);
           return;
@@ -1558,7 +1593,11 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
   fullScreenBoard: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     overflow: "hidden",
     ...(Platform.OS === "web" ? { touchAction: "none", userSelect: "none" } : {}),
   },
@@ -1766,6 +1805,12 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "800",
     marginBottom: 18,
+  },
+  modalSubtext: {
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 20,
+    lineHeight: 20,
   },
   levelTransitionRow: {
     flexDirection: "row",

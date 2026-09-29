@@ -17,6 +17,7 @@ export type LevelProgress = {
   totalArrows: number;
   clearedSnakeIds: number[];
   hearts: number;
+  hints: number;
 };
 
 type GameContextType = {
@@ -26,7 +27,13 @@ type GameContextType = {
   bestStreak: number;
   playHistory: PlayHistory;
   levelProgress: LevelProgress | null;
-  saveLevelProgress: (level: number, totalArrows: number, clearedSnakeIds: number[], hearts: number) => void;
+  saveLevelProgress: (
+    level: number,
+    totalArrows: number,
+    clearedSnakeIds: number[],
+    hearts: number,
+    hints: number
+  ) => void;
   clearLevelProgress: () => Promise<void>;
   completeLevel: () => Promise<void>;
   getGamesForDate: (dateKey: string) => number;
@@ -148,13 +155,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     loadData();
   }, []);
 
-  // Save progress instantly including remaining hearts
-  const saveLevelProgress = (lvl: number, total: number, clearedIds: number[], currentHearts: number) => {
+  // Save progress instantly including remaining hearts & hints
+  const saveLevelProgress = (
+    lvl: number,
+    total: number,
+    clearedIds: number[],
+    currentHearts: number,
+    currentHints: number
+  ) => {
     const progress: LevelProgress = {
       level: lvl,
       totalArrows: total,
       clearedSnakeIds: clearedIds,
       hearts: currentHearts,
+      hints: currentHints,
     };
     setLevelProgress(progress);
     AsyncStorage.setItem(STORAGE_KEYS.LEVEL_PROGRESS, JSON.stringify(progress)).catch(() => {});
