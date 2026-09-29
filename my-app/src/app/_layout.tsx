@@ -17,12 +17,28 @@ function injectWebFontFaces() {
 
   const fontStyles = `
     @font-face {
+      font-family: 'ionicons';
+      src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.2/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf') format('truetype');
+    }
+    @font-face {
       font-family: 'Ionicons';
       src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.2/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf') format('truetype');
     }
     @font-face {
+      font-family: 'material-community';
+      src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.2/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf') format('truetype');
+    }
+    @font-face {
+      font-family: 'MaterialCommunityIcons';
+      src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.2/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf') format('truetype');
+    }
+    @font-face {
       font-family: 'Material Design Icons';
       src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.2/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf') format('truetype');
+    }
+    @font-face {
+      font-family: 'feather';
+      src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.2/build/vendor/react-native-vector-icons/Fonts/Feather.ttf') format('truetype');
     }
     @font-face {
       font-family: 'Feather';
