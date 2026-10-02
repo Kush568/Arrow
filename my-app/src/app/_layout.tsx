@@ -77,7 +77,7 @@ export default function RootLayout() {
     }
 
     async function checkForAppUpdates() {
-      if (__DEV__) return;
+      if (__DEV__ || !Updates.isEnabled) return;
       try {
         const update = await Updates.checkForUpdateAsync();
         if (update.isAvailable) {
@@ -85,7 +85,7 @@ export default function RootLayout() {
           await Updates.reloadAsync();
         }
       } catch (err) {
-        console.log("Update check:", err);
+        // Silently catch network or manifest errors so the app never crashes
       }
     }
 
