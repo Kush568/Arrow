@@ -1,0 +1,47 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch: # Enables the manual "Run workflow" button in GitHub
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: my-app
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: my-app/package-lock.json
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Native Android Project
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build Android APK
+        working-directory: my-app/android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArrowPuzzle-Release-APK
+          path: my-app/android/app/build/outputs/apk/release/*.apk
