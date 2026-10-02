@@ -28,20 +28,27 @@ jobs:
           distribution: "temurin"
           java-version: 17
 
-      # 4. Install dependencies
+      # 4. Allocate JVM Memory for Gradle & KSP (Fixes OutOfMemory Metaspace)
+      - name: Configure Gradle & Kotlin Memory
+        run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError" >> ~/.gradle/gradle.properties
+          echo "kotlin.daemon.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=1024m" >> ~/.gradle/gradle.properties
+
+      # 5. Install dependencies
       - name: Install dependencies
         run: npm install
 
-      # 5. Generate Native Android Project
+      # 6. Generate Native Android Project
       - name: Generate Native Android Project
         run: npx expo prebuild --platform android --clean
 
-      # 6. Compile the APK using Gradle
+      # 7. Compile the APK using Gradle
       - name: Build Android APK
         working-directory: my-app/android
         run: ./gradlew assembleRelease --no-daemon
 
-      # 7. Upload the APK to GitHub Artifacts
+      # 8. Upload the APK to GitHub Artifacts
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
