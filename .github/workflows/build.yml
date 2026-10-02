@@ -27,9 +27,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Export Expo App (Web + Mobile Bundles)
+      # Exports web files + mobile JS bundles into dist
+      - name: Export Expo App
         run: npx expo export
 
+      # Deploys dist + your Cloudflare function to Cloudflare Pages
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
